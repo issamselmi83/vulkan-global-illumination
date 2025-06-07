@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <fstream>
 #include <set>
+#include <cmath>
+#include <random>
 
 namespace vrt {
 	const char* RayTracer::SHADER_VERTEX_PATH = "shaders/rendering.vert.spv";
@@ -526,20 +528,71 @@ namespace vrt {
 		createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, sizeof(Settings), _scene.settingBuffer, _scene.settingMemory);
 		vkMapMemory(_logicalDevice, _scene.settingMemory, 0, sizeof(Settings), 0, &_scene.settingHandle);
 
-		    // 1) Build exactly one sphere:
+		const int SpheresMax = 500; 
+		const glm::vec2 SphereRadius = glm::vec2(1.0f, 5.0f);
+		const float SpherePlacementRadius = 10.0f;
+
 		std::vector<Sphere> spheres;
-		Sphere sphere{};
-		sphere.radius   = 2.0f;
-		sphere.position = { 0.0f, 1.0f, 0.0f };
+		spheres.reserve(SpheresMax);
 
-		// Give it a solid diffuse color (e.g., red):
-		sphere.albedo   = { 1.0f, 0.0f, 0.0f };
+		// Set up a random‐number generator:
+		std::random_device rd;
+		std::mt19937       gen(rd());
+		std::uniform_real_distribution<float> dist01(0.0f, 1.0f);
 
-		// Zero out specular so no reflections come through:
-		sphere.specular = { 0.0f, 0.0f, 0.0f };
+		// Helper to pick a random point inside a unit circle (uniformly)
+		auto randomPointInUnitCircle = [&]() -> glm::vec2 {
+			// Using “sqrt(r)” trick for uniform distribution over disc:
+			float r     = std::sqrt(dist01(gen));
+			float theta = dist01(gen) * 2.0f * static_cast<float>(M_PI);
+			return glm::vec2(r * std::cos(theta), r * std::sin(theta));
+		};
 
-		spheres.push_back(sphere);
+		for (int i = 0; i < SpheresMax; ++i) {
+			Sphere sphere;
 
+			// 1) Random radius between SphereRadius.x and SphereRadius.y
+			float t = dist01(gen);
+			sphere.radius = SphereRadius.x + t * (SphereRadius.y - SphereRadius.x);
+
+			// 2) Random XZ‐position inside circle of radius SpherePlacementRadius
+			glm::vec2 p2d = randomPointInUnitCircle() * SpherePlacementRadius;
+			sphere.position = glm::vec3(p2d.x, sphere.radius, p2d.y);
+
+			// 3) Reject if intersecting any previously accepted sphere
+			bool intersects = false;
+			for (const auto& other : spheres) {
+				float minDist = sphere.radius + other.radius;
+				// squared‐distance test (faster than calling glm::distance)
+				glm::vec3 delta = sphere.position - other.position;
+				float dist2 = glm::dot(delta, delta);
+				if (dist2 < (minDist * minDist)) {
+					intersects = true;
+					break;
+				}
+			}
+			if (intersects)
+				continue; // skip adding this sphere and move on to the next attempt
+
+			// 4) Random HSV→RGB color (approximate with uniform RGB for simplicity)
+			float rcol = dist01(gen);
+			float gcol = dist01(gen);
+			float bcol = dist01(gen);
+			bool  metal = (dist01(gen) < 0.5f);
+
+			if (metal) {
+				// metallic: color in specular, low (near zero) diffuse
+				sphere.albedo   = glm::vec3(0.0f);
+				sphere.specular = glm::vec3(rcol, gcol, bcol);
+			} else {
+				// dielectric: color in albedo, specular = 0.04 (common default)
+				sphere.albedo   = glm::vec3(rcol, gcol, bcol);
+				sphere.specular = glm::vec3(0.04f);
+			}
+
+			// 5) Add to list
+			spheres.push_back(sphere);
+		}
 
 		VkDeviceSize spheresBufferSize = spheres.size() * sizeof(Sphere);
 		createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, spheresBufferSize, _scene.sphereBuffer, _scene.sphereMemory, spheres.data());
