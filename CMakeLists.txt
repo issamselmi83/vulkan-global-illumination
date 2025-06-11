@@ -27,6 +27,7 @@ add_custom_target(shaders ALL DEPENDS ${SPV_SHADERS})
 
 include_directories(src/)
 include_directories(third_party/stb/)
+include_directories(third_party/tinyobjloader/) 
 
 add_executable(vulkan_ray_tracer 
     src/main.cpp

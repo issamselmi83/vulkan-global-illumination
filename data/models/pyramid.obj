@@ -1,0 +1,17 @@
+# Pyramid OBJ File
+# Generated for Vulkan Ray Tracer
+
+# Vertices (base carrée + sommet)
+v -1.0 0.0 -1.0    # v1: arrière gauche
+v  1.0 0.0 -1.0    # v2: arrière droit  
+v  1.0 0.0  1.0    # v3: avant droit
+v -1.0 0.0  1.0    # v4: avant gauche
+v  0.0 2.0  0.0    # v5: sommet pyramide
+
+# Faces triangulaires (indices commencent à 1 en OBJ)
+f 4 3 5    # Face avant
+f 3 2 5    # Face droite
+f 2 1 5    # Face arrière  
+f 1 4 5    # Face gauche
+f 1 2 3    # Base triangle 1
+f 1 3 4    # Base triangle 2

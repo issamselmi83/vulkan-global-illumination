@@ -8,19 +8,23 @@
 #include <stdexcept>
 #include <fstream>
 #include <set>
+#include <iostream>
+
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "tiny_obj_loader.h"
 
 namespace vrt {
-	const char* RayTracer::SHADER_VERTEX_PATH = "shaders/rendering.vert.spv";
-	const char* RayTracer::SHADER_FRAGMENT_PATH = "shaders/rendering.frag.spv";
-	const char* RayTracer::SHADER_COMPUTE_PATH = "shaders/ray_tracing.comp.spv";
+	const char* RayTracer::SHADER_VERTEX_PATH = "data/shaders/shader.vert.spv";
+	const char* RayTracer::SHADER_FRAGMENT_PATH = "data/shaders/shader.frag.spv";
+	const char* RayTracer::SHADER_COMPUTE_PATH = "data/shaders/ray_tracing.comp.spv";
 
 	const char* RayTracer::SKY_BOX_TEXTURE_PATHS[6] = {
-		"../data/skybox/back.jpg",
-		"../data/skybox/front.jpg",
-		"../data/skybox/top.jpg",
-		"../data/skybox/bottom.jpg",
-		"../data/skybox/right.jpg",
-		"../data/skybox/left.jpg"
+	"data/skybox/back.jpg",
+    "data/skybox/front.jpg", 
+    "data/skybox/top.jpg",
+    "data/skybox/bottom.jpg",
+    "data/skybox/right.jpg",
+    "data/skybox/left.jpg"
 	};
 
 	RayTracer::RayTracer(Window& window) : _window{ window } {
@@ -71,6 +75,14 @@ namespace vrt {
 		vkUnmapMemory(_logicalDevice, _scene.settingMemory);
 		vkFreeMemory(_logicalDevice, _scene.settingMemory, nullptr);
 		vkDestroyBuffer(_logicalDevice, _scene.settingBuffer, nullptr);
+
+	   if (_scene.triangleBuffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(_logicalDevice, _scene.triangleBuffer, nullptr);
+	}
+	if (_scene.triangleBufferMemory != VK_NULL_HANDLE) {
+    vkFreeMemory(_logicalDevice, _scene.triangleBufferMemory, nullptr);
+	}
+    
 
 		vkDestroyImageView(_logicalDevice, _skyBox.imageView, nullptr);
 		vkDestroyImage(_logicalDevice, _skyBox.image, nullptr);
@@ -552,6 +564,25 @@ namespace vrt {
 
 		VkDeviceSize planesBufferSize = planes.size() * sizeof(Plane);
 		createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, planesBufferSize, _scene.planeBuffer, _scene.planeMemory, planes.data());
+		std::vector<Triangle> triangles;
+try {
+    triangles = loadOBJModel("data/models/pyramid.obj");
+} catch (const std::exception& e) {
+    std::cout << "Warning: " << e.what() << " - Using default triangle" << std::endl;
+    // Triangle par défaut si le fichier n'existe pas
+    Triangle defaultTriangle{};
+    defaultTriangle.v0 = glm::vec4(-1.0f, 0.0f, -1.0f, 1.0f);
+    defaultTriangle.v1 = glm::vec4(1.0f, 0.0f, -1.0f, 1.0f);
+    defaultTriangle.v2 = glm::vec4(0.0f, 2.0f, -1.0f, 1.0f);
+    defaultTriangle.normal = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f);
+    defaultTriangle.albedo = glm::vec4(0.2f, 0.4f, 0.8f, 0.0f);
+    defaultTriangle.specular = glm::vec4(0.1f, 0.1f, 0.1f, 0.0f);
+    triangles.push_back(defaultTriangle);
+}
+
+VkDeviceSize triangleBufferSize = triangles.size() * sizeof(Triangle);
+createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, triangleBufferSize, _scene.triangleBuffer, _scene.triangleBufferMemory, triangles.data());
+std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " << triangleBufferSize << std::endl;
 	}
 
 	void RayTracer::createDescriptorSets() {
@@ -559,7 +590,7 @@ namespace vrt {
 			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 },
 			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 },
 			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
-			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 }
+			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 }
 		};
 
 		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
@@ -616,7 +647,7 @@ namespace vrt {
 
 		{
 
-			std::vector<VkDescriptorSetLayoutBinding> computeDescriptorSetLayoutBindings{ 5 };
+			std::vector<VkDescriptorSetLayoutBinding> computeDescriptorSetLayoutBindings{ 6 };
 			VkDescriptorSetLayoutBinding computeSkyBoxDescriptorSetLayoutBinding{};
 			computeSkyBoxDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			computeSkyBoxDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -652,6 +683,13 @@ namespace vrt {
 			computePlanesDescriptorSetLayoutBinding.descriptorCount = 1;
 			computeDescriptorSetLayoutBindings[4] = computePlanesDescriptorSetLayoutBinding;
 
+			VkDescriptorSetLayoutBinding computeTrianglesDescriptorSetLayoutBinding{};
+			computeTrianglesDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			computeTrianglesDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+			computeTrianglesDescriptorSetLayoutBinding.binding = 5;
+			computeTrianglesDescriptorSetLayoutBinding.descriptorCount = 1;
+			computeDescriptorSetLayoutBindings[5] = computeTrianglesDescriptorSetLayoutBinding;
+
 			VkDescriptorSetLayoutCreateInfo computeDescriptorSetLayoutCreateInfo{};
 			computeDescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 			computeDescriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(computeDescriptorSetLayoutBindings.size());
@@ -676,7 +714,7 @@ namespace vrt {
 			skyBoxDescriptorImageInfo.imageView = _skyBox.imageView;
 			skyBoxDescriptorImageInfo.sampler = _sampler;
 
-			std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets{ 5 };
+			std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets{ 6 };
 			VkWriteDescriptorSet computeSkyBoxWriteDescriptorSet{};
 			computeSkyBoxWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			computeSkyBoxWriteDescriptorSet.dstSet = _compute.descriptorSet;
@@ -736,6 +774,26 @@ namespace vrt {
 			computePlanesWriteDescriptorSet.pBufferInfo = &planeDescriptorBufferInfo;
 			computePlanesWriteDescriptorSet.descriptorCount = 1;
 			computeWriteDescriptorSets[4] = computePlanesWriteDescriptorSet;
+
+			VkDescriptorBufferInfo triangleDescriptorBufferInfo{};
+			triangleDescriptorBufferInfo.buffer = _scene.triangleBuffer;
+			triangleDescriptorBufferInfo.range = VK_WHOLE_SIZE;
+			triangleDescriptorBufferInfo.offset = 0;
+
+			VkWriteDescriptorSet computeTrianglesWriteDescriptorSet{};
+			computeTrianglesWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			computeTrianglesWriteDescriptorSet.dstSet = _compute.descriptorSet;
+			computeTrianglesWriteDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			computeTrianglesWriteDescriptorSet.dstBinding = 5;
+			computeTrianglesWriteDescriptorSet.pBufferInfo = &triangleDescriptorBufferInfo;
+			computeTrianglesWriteDescriptorSet.descriptorCount = 1;
+			computeWriteDescriptorSets[5] = computeTrianglesWriteDescriptorSet;
+
+			std::cout << "Updating " << computeWriteDescriptorSets.size() << " descriptor sets" << std::endl;
+for (size_t i = 0; i < computeWriteDescriptorSets.size(); i++) {
+    std::cout << "DescriptorSet[" << i << "] binding=" << computeWriteDescriptorSets[i].dstBinding 
+              << " type=" << computeWriteDescriptorSets[i].descriptorType << std::endl;
+}
 
 			vkUpdateDescriptorSets(_logicalDevice, static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, nullptr);
 		}
@@ -1521,4 +1579,65 @@ namespace vrt {
 			throw std::runtime_error("Failed to create the shader module");
 		}
 	}
+std::vector<Triangle> RayTracer::loadOBJModel(const std::string& filename) {
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warn, err;
+
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename.c_str())) {
+        throw std::runtime_error("Failed to load OBJ file: " + filename + " Error: " + err);
+    }
+
+    std::vector<Triangle> triangles;
+
+    // Charger TOUS les triangles du cube (12 triangles optimaux)
+    for (const auto& shape : shapes) {
+        for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
+            int fv = shape.mesh.num_face_vertices[f];
+
+            if (fv == 3) {
+                Triangle triangle{};
+
+                for (size_t v = 0; v < 3; v++) {
+                    tinyobj::index_t idx = shape.mesh.indices[3 * f + v];
+
+                    glm::vec4 vertex = glm::vec4(
+                        attrib.vertices[3 * idx.vertex_index + 0],
+                        attrib.vertices[3 * idx.vertex_index + 1], 
+                        attrib.vertices[3 * idx.vertex_index + 2],
+                        1.0f
+                    );
+
+                    if (v == 0) triangle.v0 = vertex;
+                    else if (v == 1) triangle.v1 = vertex;
+                    else triangle.v2 = vertex;
+                }
+
+                // Calculer la normale
+                glm::vec3 edge1 = glm::vec3(triangle.v1) - glm::vec3(triangle.v0);
+                glm::vec3 edge2 = glm::vec3(triangle.v2) - glm::vec3(triangle.v0);
+                glm::vec3 normalVec3 = glm::normalize(glm::cross(edge1, edge2));
+                triangle.normal = glm::vec4(normalVec3, 0.0f);
+
+                // Couleur jaune pour tous les triangles du cube
+                triangle.albedo = glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
+                triangle.specular = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+
+                triangles.push_back(triangle);
+            }
+        }
+    }
+
+    // Positionner devant la caméra
+    for (auto& triangle : triangles) {
+        triangle.v0.x += 2.0f; triangle.v0.z -= 3.0f;
+        triangle.v1.x += 2.0f; triangle.v1.z -= 3.0f;
+        triangle.v2.x += 2.0f; triangle.v2.z -= 3.0f;
+    }
+
+    std::cout << "Loaded " << triangles.size() << " triangles from " << filename << std::endl;
+    return triangles;
 }
+}
+	

@@ -3,7 +3,7 @@
 #define PI 3.14159265
 #define FLOAT_MAX 3.402823466e+38
 
-#define ANTIALIASING_SAMPLES 2
+#define ANTIALIASING_SAMPLES 1
 #define ANTIALIASING_QUASIRANDOM_SEED_A 0.7548776662
 #define ANTIALIASING_QUASIRANDOM_SEED_B 0.5698402911
 
@@ -34,12 +34,25 @@ struct Plane {
 	vec3 specular;
 };
 
-layout (std140, binding = 3) buffer Spheres {
-	Sphere spheres[];
+struct Triangle {
+	vec4 v0;     // Changé de vec3 à vec4
+	vec4 v1;     // Changé de vec3 à vec4
+	vec4 v2;     // Changé de vec3 à vec4
+	vec4 normal; // Changé de vec3 à vec4
+	vec4 albedo; // Changé de vec3 à vec4
+	vec4 specular; // Changé de vec3 à vec4
 };
 
-layout (std140, binding = 4) buffer Planes {
-	Plane planes[];
+layout (std430, binding = 5) buffer Triangles {
+    Triangle triangles[];
+};
+
+layout (std430, binding = 3) buffer Spheres {
+    Sphere spheres[];
+};
+
+layout (std430, binding = 4) buffer Planes {
+    Plane planes[];
 };
 
 struct Ray {
@@ -111,6 +124,44 @@ void intersectSphere(Ray ray, inout RayHit bestHit, Sphere sphere) {
     }
 }
 
+void intersectTriangle(Ray ray, inout RayHit bestHit, Triangle triangle) {
+    const float EPSILON = 0.000001;  // Plus élevé pour plus d'optimisation
+    
+    vec3 edge1 = triangle.v1.xyz - triangle.v0.xyz;
+    vec3 edge2 = triangle.v2.xyz - triangle.v0.xyz;
+    vec3 h = cross(ray.direction, edge2);
+    float a = dot(edge1, h);
+    
+    // EARLY EXIT 1 : Backface culling plus agressif
+    if (a < EPSILON) return;
+    
+    float f = 1.0 / a;
+    vec3 s = ray.origin - triangle.v0.xyz;
+    float u = f * dot(s, h);
+    
+    // EARLY EXIT 2 : Test u optimisé
+    if (u < 0.0 || u > 1.0) return;
+    
+    vec3 q = cross(s, edge1);
+    float v = f * dot(ray.direction, q);
+    
+    // EARLY EXIT 3 : Test v optimisé  
+    if (v < 0.0 || u + v > 1.0) return;
+    
+    float t = f * dot(edge2, q);
+    
+    // EARLY EXIT 4 : Test distance plus tôt
+    if (t <= EPSILON || t >= bestHit.distance) return;
+    
+    // Seulement maintenant, faire les calculs
+    bestHit.distance = t;
+    bestHit.position = ray.origin + t * ray.direction;
+    bestHit.normal = triangle.normal.xyz;
+    bestHit.albedo = triangle.albedo.xyz;  // Vraie couleur du triangle
+    bestHit.specular = vec3(0.0, 0.0, 0.0);
+}
+
+
 RayHit trace(Ray ray) {
     RayHit bestHit = createRayHit();
 
@@ -121,50 +172,51 @@ RayHit trace(Ray ray) {
     for (int i = 0; i < spheres.length(); i++) {
 		Sphere sphere = spheres[i];
 		sphere.position += vec3(0.0f, 1.0f + sin(settings.angle + i), 0.0f);
-	
         intersectSphere(ray, bestHit, sphere);
     }
+    
+    // TEST TRIANGLE : Forcer directement un hit jaune
+     // Triangles avec limitation à 4 max
+    for (int i = 0; i < triangles.length(); i++) {
+    intersectTriangle(ray, bestHit, triangles[i]);
+}
 
     return bestHit;
 }
 
 vec3 shade(inout Ray ray, RayHit hit) {
     if (hit.distance < FLOAT_MAX) {
+        
+        
+        
+        // Code normal pour les autres objets
         ray.origin = hit.position + hit.normal * 0.001f;
         ray.direction = reflect(ray.direction, hit.normal);
         ray.energy *= hit.specular;
 
         Ray shadowRay = createRay(hit.position + hit.normal * 0.001f, -1 * settings.directionalLight.xyz);
         RayHit shadowHit = trace(shadowRay);
-        if (shadowHit.distance != FLOAT_MAX) {
-            return vec3(0.0f, 0.0f, 0.0f);
-        }
+        
+        // IGNORER les ombres causées par les triangles
+       if (shadowHit.distance != FLOAT_MAX) {
+    return vec3(0.0f, 0.0f, 0.0f);  // Ombre normale
+}
 
         return clamp(dot(hit.normal, settings.directionalLight.xyz) * -1, 0.0f, 1.0f) * settings.directionalLight.w * hit.albedo;
     } else {
         ray.energy *= 0.0f;
-		
-		float theta = acos(ray.direction.y) / PI;
+        
+        float theta = acos(ray.direction.y) / PI;
         float phi = atan(ray.direction.x, -ray.direction.z) / (2 * PI) + 0.5f;
-		
-		return texture(samplerSkybox, ray.direction).xyz;
+        
+        return texture(samplerSkybox, ray.direction).xyz;
     }
 }
 
 void main() {
-	vec3 result = vec3(0.0f, 0.0f, 0.0f);
-
-	for (int i = 0; i < ANTIALIASING_SAMPLES; i++) {
-		Ray ray = createCameraRay(i);
-		
-		for (int i = 0; i < 5; i++) {
-			RayHit hit = trace(ray);
-			result += ray.energy * shade(ray, hit);
-			
-			if (ray.energy.x == 0.0f && ray.energy.y == 0.0f && ray.energy.z == 0.0f)
-				break;
-		}
-	}
-	
-	imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), vec4(result / ANTIALIASING_SAMPLES, 1.0f));
+    Ray ray = createCameraRay(0);
+    RayHit hit = trace(ray);
+    vec3 result = shade(ray, hit);
+    
+    imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), vec4(result, 1.0f));
 }

@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 
 #include <vector>
+#include <string>
 
 namespace vrt {
 	struct Settings {
@@ -29,6 +30,15 @@ namespace vrt {
 		alignas(16) glm::vec3 albedo;
 		alignas(16) glm::vec3 specular;
 	};
+
+	struct Triangle {
+    glm::vec4 v0;      // Au lieu de glm::vec3
+    glm::vec4 v1;      // Au lieu de glm::vec3  
+    glm::vec4 v2;      // Au lieu de glm::vec3
+    glm::vec4 normal;  // Au lieu de glm::vec3
+    glm::vec4 albedo;  // Au lieu de glm::vec3
+    glm::vec4 specular; // Au lieu de glm::vec3
+};
 
 	class RayTracer {
 	public:
@@ -79,7 +89,7 @@ namespace vrt {
 		void createStorageBuffer(VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkDeviceSize size, VkBuffer& buffer, VkDeviceMemory& bufferMemory, void* data);
 
 		void loadShaderModule(const char* path, VkShaderModule& shaderModule);
-
+        std::vector<Triangle> loadOBJModel(const std::string& filename);
 	private:
 		const std::vector<const char*> REQUIRED_EXTENSION_PROPERTIES{
 			VK_KHR_SWAPCHAIN_EXTENSION_NAME
@@ -170,6 +180,9 @@ namespace vrt {
 
 			VkBuffer planeBuffer;
 			VkDeviceMemory planeMemory;
+            
+			VkBuffer triangleBuffer;
+   			 VkDeviceMemory triangleBufferMemory;
 
 			Settings settings;
 			VkBuffer settingBuffer;	// Uniform Buffer Object (UBO)
