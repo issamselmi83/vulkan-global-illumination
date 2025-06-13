@@ -1,0 +1,5 @@
+#cmakedefine CONFIG_ENABLE
+#cmakedefine MODELS_DIR "@MODELS_DIR@"
+#cmakedefine SHADERS_DIR "@SHADERS_DIR@"
+#cmakedefine TEXTURES_DIR "@TEXTURES_DIR@"
+

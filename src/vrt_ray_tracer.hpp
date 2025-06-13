@@ -6,6 +6,8 @@
 #include <glm/glm.hpp>
 
 #include <vector>
+#include <config.h>
+#include <string>
 
 namespace vrt {
 	struct Settings {
@@ -89,11 +91,11 @@ namespace vrt {
 			"VK_LAYER_KHRONOS_validation"
 		};
 
-		static const char* SHADER_VERTEX_PATH;
-		static const char* SHADER_FRAGMENT_PATH;
-		static const char* SHADER_COMPUTE_PATH;
+		static std::string SHADER_VERTEX_PATH;
+		static std::string SHADER_FRAGMENT_PATH;
+		static std::string SHADER_COMPUTE_PATH;
 
-		static const char* SKY_BOX_TEXTURE_PATHS[6];
+		static std::string SKY_BOX_TEXTURE_PATHS[6];
 
 	private:
 		Window& _window;

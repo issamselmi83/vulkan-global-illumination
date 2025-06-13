@@ -10,22 +10,46 @@
 #include <set>
 #include <cmath>
 #include <random>
+#include <sstream>
+#include<string>
+#include <cstring>
+#include <iostream>
 
 namespace vrt {
-	const char* RayTracer::SHADER_VERTEX_PATH = "shaders/rendering.vert.spv";
-	const char* RayTracer::SHADER_FRAGMENT_PATH = "shaders/rendering.frag.spv";
-	const char* RayTracer::SHADER_COMPUTE_PATH = "shaders/ray_tracing.comp.spv";
+	std::string RayTracer::SHADER_VERTEX_PATH;
+	std::string RayTracer::SHADER_FRAGMENT_PATH;
+	std::string RayTracer::SHADER_COMPUTE_PATH;
 
-	const char* RayTracer::SKY_BOX_TEXTURE_PATHS[6] = {
-		"../data/skybox/back.jpg",
-		"../data/skybox/front.jpg",
-		"../data/skybox/top.jpg",
-		"../data/skybox/bottom.jpg",
-		"../data/skybox/right.jpg",
-		"../data/skybox/left.jpg"
+	std::string RayTracer::SKY_BOX_TEXTURE_PATHS[6] = {
+		"back.jpg",
+		"front.jpg",
+		"top.jpg",
+		"bottom.jpg",
+		"right.jpg",
+		"left.jpg"
 	};
 
 	RayTracer::RayTracer(Window& window) : _window{ window } {
+		/**************************************************************
+		 * This code initialize the paths for the shaders and the textures dynamically. 
+		 */
+		std::stringstream ssShadersPath;
+		ssShadersPath << SHADERS_DIR << "/";
+		std::string vertShader = "rendering.vert.spv";
+		std::string fragShader = "rendering.frag.spv";
+		std::string rayTracingShader = "ray_tracing.comp.spv";
+		vertShader = (ssShadersPath.str() + vertShader);
+
+		RayTracer::SHADER_VERTEX_PATH = vertShader;
+		RayTracer::SHADER_FRAGMENT_PATH = (ssShadersPath.str() + fragShader);
+		RayTracer::SHADER_COMPUTE_PATH = (ssShadersPath.str() + rayTracingShader);
+
+		std::stringstream ssTexturesPath;
+		ssTexturesPath << TEXTURES_DIR << "/";
+
+		for (size_t i = 0;i < 6;i++)
+			RayTracer::SKY_BOX_TEXTURE_PATHS[i] = (ssTexturesPath.str() + RayTracer::SKY_BOX_TEXTURE_PATHS[i]);
+		
 		// Initialise une instance Vulkan 
 		createInstance();
 		// Sélectionne un GPU compatible et crée un VkDevice (logical device)
@@ -472,7 +496,7 @@ namespace vrt {
 		int texWidth, texHeight, texChannels;
 		stbi_uc* layers[6];
 		for (size_t index = 0; index < 6; index++) {
-			layers[index] = stbi_load(SKY_BOX_TEXTURE_PATHS[index], &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+			layers[index] = stbi_load(SKY_BOX_TEXTURE_PATHS[index].c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 		}
 		
 		if (!layers[0] || !layers[1] || !layers[2] || !layers[3] || !layers[4] || !layers[5]) {
@@ -807,7 +831,7 @@ namespace vrt {
 		}
 
 		VkShaderModule shaderVertex{};
-		loadShaderModule(SHADER_VERTEX_PATH, shaderVertex);
+		loadShaderModule(SHADER_VERTEX_PATH.c_str(), shaderVertex);
 
 		VkPipelineShaderStageCreateInfo vertexShaderStageInfo{};
 		vertexShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -816,7 +840,7 @@ namespace vrt {
 		vertexShaderStageInfo.pName = "main";
 
 		VkShaderModule shaderFragment;
-		loadShaderModule(SHADER_FRAGMENT_PATH, shaderFragment);
+		loadShaderModule(SHADER_FRAGMENT_PATH.c_str(), shaderFragment);
 
 		VkPipelineShaderStageCreateInfo fragmentShaderStageInfo{};
 		fragmentShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -939,7 +963,7 @@ namespace vrt {
 		}
 
 		VkShaderModule shaderCompute{};
-		loadShaderModule(SHADER_COMPUTE_PATH, shaderCompute);
+		loadShaderModule(SHADER_COMPUTE_PATH.c_str(), shaderCompute);
 
 		VkPipelineShaderStageCreateInfo vertexComputeStageInfo{};
 		vertexComputeStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
