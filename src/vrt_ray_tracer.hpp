@@ -39,6 +39,12 @@ namespace vrt {
     glm::vec4 albedo;  // Au lieu de glm::vec3
     glm::vec4 specular; // Au lieu de glm::vec3
 };
+    // Structure BVH Node (après la structure Triangle)
+	struct BVHNode {
+    glm::vec4 boxMin;           // xyz = min corner, w = unused
+    glm::vec4 boxMax;           // xyz = max corner, w = unused
+    glm::ivec4 nodeData;        // x=leftChild, y=rightChild, z=triangleStart, w=triangleCount
+};
 
 	class RayTracer {
 	public:
@@ -85,11 +91,17 @@ namespace vrt {
 		void createImageAndView(VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& memory, VkImageView& view, uint32_t width, uint32_t height);
 		void createCubeMap(VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& memory, VkImageView& view, uint32_t width, uint32_t height);
 		void changeImageLayout(VkImageLayout oldLayout, VkImageLayout newLayout, VkImage image, VkAccessFlags srcAccessMask = 0, VkAccessFlags dstAccessMask = 0, uint32_t layerCount = 1);
-
 		void createStorageBuffer(VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkDeviceSize size, VkBuffer& buffer, VkDeviceMemory& bufferMemory, void* data);
 
 		void loadShaderModule(const char* path, VkShaderModule& shaderModule);
-        std::vector<Triangle> loadOBJModel(const std::string& filename);
+        std::vector<Triangle> loadOBJModel(const std::string& filename, glm::vec3 color = glm::vec3(1.0f, 1.0f, 0.0f));
+		void buildBVH();
+		int buildBVHRecursive(std::vector<int>& triangleIndices, int depth);
+		int buildBVHWithReorganization(std::vector<int>& indices, const std::vector<Triangle>& original, int depth);  
+        void updateTriangleBuffer(); 
+		glm::vec3 getTriangleMin(int triangleIndex);
+		glm::vec3 getTriangleMax(int triangleIndex);
+		void createBVHBuffer();
 	private:
 		const std::vector<const char*> REQUIRED_EXTENSION_PROPERTIES{
 			VK_KHR_SWAPCHAIN_EXTENSION_NAME
@@ -183,6 +195,12 @@ namespace vrt {
             
 			VkBuffer triangleBuffer;
    			 VkDeviceMemory triangleBufferMemory;
+
+			 std::vector<Triangle> triangles;
+
+			std::vector<BVHNode> bvhNodes;
+    		VkBuffer bvhBuffer;
+   			VkDeviceMemory bvhBufferMemory;
 
 			Settings settings;
 			VkBuffer settingBuffer;	// Uniform Buffer Object (UBO)

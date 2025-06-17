@@ -12,6 +12,8 @@
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
+#include <chrono>  
+#include <algorithm>
 
 namespace vrt {
 	const char* RayTracer::SHADER_VERTEX_PATH = "data/shaders/shader.vert.spv";
@@ -82,7 +84,12 @@ namespace vrt {
 	if (_scene.triangleBufferMemory != VK_NULL_HANDLE) {
     vkFreeMemory(_logicalDevice, _scene.triangleBufferMemory, nullptr);
 	}
-    
+    if (_scene.bvhBuffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(_logicalDevice, _scene.bvhBuffer, nullptr);
+	}
+	if (_scene.bvhBufferMemory != VK_NULL_HANDLE) {
+    vkFreeMemory(_logicalDevice, _scene.bvhBufferMemory, nullptr);
+	}
 
 		vkDestroyImageView(_logicalDevice, _skyBox.imageView, nullptr);
 		vkDestroyImage(_logicalDevice, _skyBox.image, nullptr);
@@ -117,6 +124,20 @@ namespace vrt {
 	}
 
 	void RayTracer::drawFrame() {
+		static auto lastTime = std::chrono::high_resolution_clock::now();
+    static int frameCount = 0;
+    static float fps = 0.0f;
+    
+    frameCount++;
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration<float>(currentTime - lastTime).count();
+    
+    if (duration >= 1.0f) { // Chaque seconde
+        fps = frameCount / duration;
+        //std::cout << "FPS: " << (int)fps << " | Frame time: " << (1000.0f/fps) << "ms" << std::endl;
+        frameCount = 0;
+        lastTime = currentTime;
+    }
 		VkSubmitInfo computeSubmitInfo{};
 		computeSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		computeSubmitInfo.commandBufferCount = 1;
@@ -564,25 +585,45 @@ namespace vrt {
 
 		VkDeviceSize planesBufferSize = planes.size() * sizeof(Plane);
 		createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, planesBufferSize, _scene.planeBuffer, _scene.planeMemory, planes.data());
-		std::vector<Triangle> triangles;
-try {
-    triangles = loadOBJModel("data/models/teapot.obj");
-} catch (const std::exception& e) {
-    std::cout << "Warning: " << e.what() << " - Using default triangle" << std::endl;
-    // Triangle par défaut si le fichier n'existe pas
-    Triangle defaultTriangle{};
-    defaultTriangle.v0 = glm::vec4(-1.0f, 0.0f, -1.0f, 1.0f);
-    defaultTriangle.v1 = glm::vec4(1.0f, 0.0f, -1.0f, 1.0f);
-    defaultTriangle.v2 = glm::vec4(0.0f, 2.0f, -1.0f, 1.0f);
-    defaultTriangle.normal = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f);
-    defaultTriangle.albedo = glm::vec4(0.2f, 0.4f, 0.8f, 0.0f);
-    defaultTriangle.specular = glm::vec4(0.1f, 0.1f, 0.1f, 0.0f);
-    triangles.push_back(defaultTriangle);
-}
+	
+    
+    try {
+    // Pyramide ROUGE
+    //auto pyramidTriangles = loadOBJModel("data/models/pyramid.obj", glm::vec3(1.0f, 0.2f, 0.2f));
+    //_scene.triangles = pyramidTriangles;
+    
+    // OU Teapot VERT
+     //auto teapotTriangles = loadOBJModel("data/models/teapot.obj", glm::vec3(0.2f, 1.0f, 0.3f));
+     //_scene.triangles = teapotTriangles;
+	 // CUBE JAUNE 
+	 auto cubeTriangles = loadOBJModel("data/models/cube.obj", glm::vec3(1.0f, 1.0f, 0.2f));
+	_scene.triangles = cubeTriangles;
 
-VkDeviceSize triangleBufferSize = triangles.size() * sizeof(Triangle);
-createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, triangleBufferSize, _scene.triangleBuffer, _scene.triangleBufferMemory, triangles.data());
-std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " << triangleBufferSize << std::endl;
+	 // CÔNE ORANGE
+	 
+	//auto coneTriangles = loadOBJModel("data/models/Cone.obj", glm::vec3(1.0f, 0.5f, 0.1f));
+	//_scene.triangles = coneTriangles;
+
+    } catch (const std::exception& e) {
+        std::cout << "Warning: " << e.what() << " - Using default triangle" << std::endl;
+        Triangle defaultTriangle{};
+        defaultTriangle.v0 = glm::vec4(-1.0f, 0.0f, -1.0f, 1.0f);
+        defaultTriangle.v1 = glm::vec4(1.0f, 0.0f, -1.0f, 1.0f);
+        defaultTriangle.v2 = glm::vec4(0.0f, 2.0f, -1.0f, 1.0f);
+        defaultTriangle.normal = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f);
+        defaultTriangle.albedo = glm::vec4(0.2f, 0.4f, 0.8f, 0.0f);
+        defaultTriangle.specular = glm::vec4(0.1f, 0.1f, 0.1f, 0.0f);
+        _scene.triangles.push_back(defaultTriangle);  // ← Changé en _scene.triangles
+    }
+    
+    VkDeviceSize triangleBufferSize = _scene.triangles.size() * sizeof(Triangle);
+    createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, triangleBufferSize, _scene.triangleBuffer, _scene.triangleBufferMemory, _scene.triangles.data());
+    std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " << triangleBufferSize << std::endl;
+    
+    
+    buildBVH();
+    createBVHBuffer();	
+
 	}
 
 	void RayTracer::createDescriptorSets() {
@@ -590,7 +631,7 @@ std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " <
 			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 },
 			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 },
 			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
-			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 }
+			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4 }
 		};
 
 		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
@@ -647,7 +688,7 @@ std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " <
 
 		{
 
-			std::vector<VkDescriptorSetLayoutBinding> computeDescriptorSetLayoutBindings{ 6 };
+			std::vector<VkDescriptorSetLayoutBinding> computeDescriptorSetLayoutBindings{ 7 };
 			VkDescriptorSetLayoutBinding computeSkyBoxDescriptorSetLayoutBinding{};
 			computeSkyBoxDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			computeSkyBoxDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -690,6 +731,13 @@ std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " <
 			computeTrianglesDescriptorSetLayoutBinding.descriptorCount = 1;
 			computeDescriptorSetLayoutBindings[5] = computeTrianglesDescriptorSetLayoutBinding;
 
+			VkDescriptorSetLayoutBinding computeBVHDescriptorSetLayoutBinding{};
+			computeBVHDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			computeBVHDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+			computeBVHDescriptorSetLayoutBinding.binding = 6;
+			computeBVHDescriptorSetLayoutBinding.descriptorCount = 1;
+			computeDescriptorSetLayoutBindings[6] = computeBVHDescriptorSetLayoutBinding;
+
 			VkDescriptorSetLayoutCreateInfo computeDescriptorSetLayoutCreateInfo{};
 			computeDescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 			computeDescriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(computeDescriptorSetLayoutBindings.size());
@@ -714,7 +762,7 @@ std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " <
 			skyBoxDescriptorImageInfo.imageView = _skyBox.imageView;
 			skyBoxDescriptorImageInfo.sampler = _sampler;
 
-			std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets{ 6 };
+			std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets{ 7 };
 			VkWriteDescriptorSet computeSkyBoxWriteDescriptorSet{};
 			computeSkyBoxWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			computeSkyBoxWriteDescriptorSet.dstSet = _compute.descriptorSet;
@@ -788,6 +836,20 @@ std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " <
 			computeTrianglesWriteDescriptorSet.pBufferInfo = &triangleDescriptorBufferInfo;
 			computeTrianglesWriteDescriptorSet.descriptorCount = 1;
 			computeWriteDescriptorSets[5] = computeTrianglesWriteDescriptorSet;
+
+			VkDescriptorBufferInfo bvhDescriptorBufferInfo{};
+			bvhDescriptorBufferInfo.buffer = _scene.bvhBuffer;
+			bvhDescriptorBufferInfo.range = VK_WHOLE_SIZE;
+			bvhDescriptorBufferInfo.offset = 0;
+
+			VkWriteDescriptorSet computeBVHWriteDescriptorSet{};
+			computeBVHWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			computeBVHWriteDescriptorSet.dstSet = _compute.descriptorSet;
+			computeBVHWriteDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			computeBVHWriteDescriptorSet.dstBinding = 6;
+			computeBVHWriteDescriptorSet.pBufferInfo = &bvhDescriptorBufferInfo;
+			computeBVHWriteDescriptorSet.descriptorCount = 1;
+			computeWriteDescriptorSets[6] = computeBVHWriteDescriptorSet;
 
 			std::cout << "Updating " << computeWriteDescriptorSets.size() << " descriptor sets" << std::endl;
 for (size_t i = 0; i < computeWriteDescriptorSets.size(); i++) {
@@ -1579,7 +1641,15 @@ for (size_t i = 0; i < computeWriteDescriptorSets.size(); i++) {
 			throw std::runtime_error("Failed to create the shader module");
 		}
 	}
-std::vector<Triangle> RayTracer::loadOBJModel(const std::string& filename) {
+// Dans vrt_ray_tracer.cpp, fonction loadOBJModel() optimisée
+
+// Dans vrt_ray_tracer.cpp, fonction loadOBJModel() optimisée
+
+// Dans vrt_ray_tracer.cpp, fonction loadOBJModel() optimisée
+
+// Nouvelle signature avec couleur
+
+std::vector<Triangle> RayTracer::loadOBJModel(const std::string& filename, glm::vec3 color) {
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
@@ -1591,7 +1661,6 @@ std::vector<Triangle> RayTracer::loadOBJModel(const std::string& filename) {
 
     std::vector<Triangle> triangles;
 
-    // Charger TOUS les triangles du cube (12 triangles optimaux)
     for (const auto& shape : shapes) {
         for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
             int fv = shape.mesh.num_face_vertices[f];
@@ -1620,24 +1689,219 @@ std::vector<Triangle> RayTracer::loadOBJModel(const std::string& filename) {
                 glm::vec3 normalVec3 = glm::normalize(glm::cross(edge1, edge2));
                 triangle.normal = glm::vec4(normalVec3, 0.0f);
 
-                // Couleur jaune pour tous les triangles du cube
-                triangle.albedo = glm::vec4(1.0f, 1.0f, 0.0f, 0.0f);
+                // COULEUR PERSONNALISÉE 
+                triangle.albedo = glm::vec4(color, 0.0f);
                 triangle.specular = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
 
                 triangles.push_back(triangle);
+            } else if (fv == 4) {
+                // SUPPORTER LES QUADS (pour le diamant)
+                // Diviser le quad en 2 triangles
+                
+                // Premier triangle (0,1,2)
+                Triangle triangle1{};
+                for (int v = 0; v < 3; v++) {
+                    tinyobj::index_t idx = shape.mesh.indices[4 * f + v];
+                    glm::vec4 vertex = glm::vec4(
+                        attrib.vertices[3 * idx.vertex_index + 0],
+                        attrib.vertices[3 * idx.vertex_index + 1], 
+                        attrib.vertices[3 * idx.vertex_index + 2],
+                        1.0f
+                    );
+                    if (v == 0) triangle1.v0 = vertex;
+                    else if (v == 1) triangle1.v1 = vertex;
+                    else triangle1.v2 = vertex;
+                }
+                
+                // Deuxième triangle (0,2,3)
+                Triangle triangle2{};
+                triangle2.v0 = triangle1.v0; // Même vertex 0
+                triangle2.v1 = triangle1.v2; // Vertex 2 du premier triangle
+                
+                tinyobj::index_t idx3 = shape.mesh.indices[4 * f + 3];
+                triangle2.v2 = glm::vec4(
+                    attrib.vertices[3 * idx3.vertex_index + 0],
+                    attrib.vertices[3 * idx3.vertex_index + 1], 
+                    attrib.vertices[3 * idx3.vertex_index + 2],
+                    1.0f
+                );
+                
+                // Calculer normales pour les deux triangles
+                glm::vec3 edge1_1 = glm::vec3(triangle1.v1) - glm::vec3(triangle1.v0);
+                glm::vec3 edge2_1 = glm::vec3(triangle1.v2) - glm::vec3(triangle1.v0);
+                triangle1.normal = glm::vec4(glm::normalize(glm::cross(edge1_1, edge2_1)), 0.0f);
+                triangle1.albedo = glm::vec4(color, 0.0f);
+                triangle1.specular = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+                
+                glm::vec3 edge1_2 = glm::vec3(triangle2.v1) - glm::vec3(triangle2.v0);
+                glm::vec3 edge2_2 = glm::vec3(triangle2.v2) - glm::vec3(triangle2.v0);
+                triangle2.normal = glm::vec4(glm::normalize(glm::cross(edge1_2, edge2_2)), 0.0f);
+                triangle2.albedo = glm::vec4(color, 0.0f);
+                triangle2.specular = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+                
+                triangles.push_back(triangle1);
+                triangles.push_back(triangle2);
             }
         }
     }
 
-    // Positionner devant la caméra
+    // Position à gauche de la sphère  
     for (auto& triangle : triangles) {
-        triangle.v0.x += 2.0f; triangle.v0.z -= 3.0f;
-        triangle.v1.x += 2.0f; triangle.v1.z -= 3.0f;
-        triangle.v2.x += 2.0f; triangle.v2.z -= 3.0f;
+        triangle.v0.x -= 3.0f; triangle.v0.z -= 4.0f;
+        triangle.v1.x -= 3.0f; triangle.v1.z -= 4.0f;
+        triangle.v2.x -= 3.0f; triangle.v2.z -= 4.0f;
     }
 
     std::cout << "Loaded " << triangles.size() << " triangles from " << filename << std::endl;
     return triangles;
 }
+// REMPLACEZ complètement vos fonctions BVH par cette version ultra-optimisée :
+
+void RayTracer::buildBVH() {
+    if (_scene.triangles.empty()) return;
+    
+    std::cout << "Building HIGH-PERFORMANCE BVH for " << _scene.triangles.size() << " triangles..." << std::endl;
+    
+    _scene.bvhNodes.clear();
+    
+    // Sauvegarder les triangles originaux
+    std::vector<Triangle> originalTriangles = _scene.triangles;
+    _scene.triangles.clear();  // On va les réorganiser
+    
+    // Créer liste d'indices
+    std::vector<int> triangleIndices;
+    for (int i = 0; i < originalTriangles.size(); i++) {
+        triangleIndices.push_back(i);
+    }
+    
+    // Construire le BVH en réorganisant les triangles
+    if (!triangleIndices.empty()) {
+        buildBVHWithReorganization(triangleIndices, originalTriangles, 0);
+    }
+    
+    std::cout << "HIGH-PERF BVH: " << _scene.bvhNodes.size() << " nodes, " 
+              << _scene.triangles.size() << " triangles reorganized" << std::endl;
+    
+  
+    
+    
+    // CRUCIAL : Recréer le buffer GPU avec les triangles réorganisés 
+    updateTriangleBuffer();
+}
+
+int RayTracer::buildBVHWithReorganization(std::vector<int>& indices, 
+                                         const std::vector<Triangle>& original, 
+                                         int depth) {
+    if (indices.empty()) return -1;
+    
+    BVHNode node{};
+    int nodeIndex = _scene.bvhNodes.size();
+    _scene.bvhNodes.push_back(node);
+    
+    // Calculer bounding box
+    glm::vec3 boxMin(FLT_MAX), boxMax(-FLT_MAX);
+    for (int idx : indices) {
+        const Triangle& tri = original[idx];
+        glm::vec3 v0 = glm::vec3(tri.v0);
+        glm::vec3 v1 = glm::vec3(tri.v1);  
+        glm::vec3 v2 = glm::vec3(tri.v2);
+        
+        glm::vec3 triMin = glm::min(glm::min(v0, v1), v2);
+        glm::vec3 triMax = glm::max(glm::max(v0, v1), v2);
+        
+        boxMin = glm::min(boxMin, triMin);
+        boxMax = glm::max(boxMax, triMax);
+    }
+    
+    _scene.bvhNodes[nodeIndex].boxMin = glm::vec4(boxMin, 0.0f);
+    _scene.bvhNodes[nodeIndex].boxMax = glm::vec4(boxMax, 0.0f);
+    
+    // FEUILLE OPTIMISÉE : 8 triangles max, profondeur max 18
+    if (indices.size() <= 8 || depth > 18) {
+        int startIndex = _scene.triangles.size();
+        
+        // Copier tous les triangles de cette feuille de manière contiguë
+        for (int idx : indices) {
+            _scene.triangles.push_back(original[idx]);
+        }
+        
+        _scene.bvhNodes[nodeIndex].nodeData.x = -1;  // Feuille
+        _scene.bvhNodes[nodeIndex].nodeData.y = -1;  // Feuille
+        _scene.bvhNodes[nodeIndex].nodeData.z = startIndex;  // Offset contigu
+        _scene.bvhNodes[nodeIndex].nodeData.w = indices.size();  // Count
+        
+        return nodeIndex;
+    }
+    
+    // DIVISION OPTIMISÉE avec Surface Area Heuristic simplifié
+    glm::vec3 extent = boxMax - boxMin;
+    int bestAxis = (extent.x > extent.y) ? ((extent.x > extent.z) ? 0 : 2) : ((extent.y > extent.z) ? 1 : 2);
+    
+    // Trier par le centroïde des triangles
+    std::sort(indices.begin(), indices.end(), [&](int a, int b) {
+        const Triangle& triA = original[a];
+        const Triangle& triB = original[b];
+        
+        float centerA = (triA.v0[bestAxis] + triA.v1[bestAxis] + triA.v2[bestAxis]) / 3.0f;
+        float centerB = (triB.v0[bestAxis] + triB.v1[bestAxis] + triB.v2[bestAxis]) / 3.0f;
+        
+        return centerA < centerB;
+    });
+    
+    // Division équilibrée
+    int mid = indices.size() / 2;
+    std::vector<int> leftIndices(indices.begin(), indices.begin() + mid);
+    std::vector<int> rightIndices(indices.begin() + mid, indices.end());
+    
+    // Construire récursivement
+    int leftChild = buildBVHWithReorganization(leftIndices, original, depth + 1);
+    int rightChild = buildBVHWithReorganization(rightIndices, original, depth + 1);
+    
+    _scene.bvhNodes[nodeIndex].nodeData.x = leftChild;
+    _scene.bvhNodes[nodeIndex].nodeData.y = rightChild;
+    _scene.bvhNodes[nodeIndex].nodeData.z = -1;
+    _scene.bvhNodes[nodeIndex].nodeData.w = 0;
+    
+    return nodeIndex;
+}
+
+void RayTracer::updateTriangleBuffer() {
+    // Détruire l'ancien buffer
+    if (_scene.triangleBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(_logicalDevice, _scene.triangleBuffer, nullptr);
+        vkFreeMemory(_logicalDevice, _scene.triangleBufferMemory, nullptr);
+    }
+    
+    // Créer le nouveau buffer avec les triangles réorganisés
+    VkDeviceSize triangleBufferSize = _scene.triangles.size() * sizeof(Triangle);
+    
+    createStorageBuffer(
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        triangleBufferSize,
+        _scene.triangleBuffer,
+        _scene.triangleBufferMemory,
+        _scene.triangles.data()
+    );
+    
+    std::cout << "Triangle buffer recreated: " << triangleBufferSize << " bytes" << std::endl;
+}
+void RayTracer::createBVHBuffer() {
+    if (_scene.bvhNodes.empty()) return;
+    
+    VkDeviceSize bufferSize = sizeof(BVHNode) * _scene.bvhNodes.size();
+    
+    createStorageBuffer(
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        bufferSize,
+        _scene.bvhBuffer,
+        _scene.bvhBufferMemory,
+        _scene.bvhNodes.data()
+    );
+    
+    std::cout << "BVH buffer created: size=" << bufferSize << " bytes" << std::endl;
+}
+
 }
 	

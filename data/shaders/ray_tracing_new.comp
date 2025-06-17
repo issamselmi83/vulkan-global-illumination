@@ -135,42 +135,17 @@ void intersectSphere(Ray ray, inout RayHit bestHit, Sphere sphere) {
 }
 
 void intersectTriangle(Ray ray, inout RayHit bestHit, Triangle triangle) {
-    vec3 v0 = triangle.v0.xyz;
-    vec3 v1 = triangle.v1.xyz;
-    vec3 v2 = triangle.v2.xyz;
-    
-    // Version ultra-optimisée
-    vec3 edge1 = v1 - v0;
-    vec3 edge2 = v2 - v0;
-    vec3 h = cross(ray.direction, edge2);
-    float a = dot(edge1, h);
-    
-    // Accepter les triangles des deux côtés
-    if (abs(a) < 0.001) return;
-    
-    float f = 1.0 / a;
-    vec3 s = ray.origin - v0;
-    float u = f * dot(s, h);
-    
-    // Tests barycentric optimisés
-    if (u < 0.0 || u > 1.0) return;
-    
-    vec3 q = cross(s, edge1);
-    float v = f * dot(ray.direction, q);
-    
-    if (v < 0.0 || u + v > 1.0) return;
-    
-    float t = f * dot(edge2, q);
-    
-    // Test final avec seuil plus large
-    if (t > 0.001 && t < bestHit.distance) {
+    // VERSION ULTRA-SIMPLE pour test performance
+    float t = 5.0; // Distance fixe
+    if (t < bestHit.distance) {
         bestHit.distance = t;
         bestHit.position = ray.origin + t * ray.direction;
-        bestHit.normal = triangle.normal.xyz;
+        bestHit.normal = vec3(0.0, 1.0, 0.0);
         bestHit.albedo = triangle.albedo.xyz;
-        bestHit.specular = vec3(0.0); // Pas de reflets pour performance
+        bestHit.specular = vec3(0.0, 0.0, 0.0);
     }
 }
+
 // Intersection rayon-boîte englobante
 bool intersectAABB(Ray ray, vec3 boxMin, vec3 boxMax) {
     vec3 invDir = 1.0 / ray.direction;
@@ -186,31 +161,30 @@ bool intersectAABB(Ray ray, vec3 boxMin, vec3 boxMax) {
     return tNear <= tFar && tFar > 0.0;
 }
 
-
-// BVH optimisé SANS early exits destructeurs
+// Traversal BVH avec stack simulée
 void intersectBVH(Ray ray, inout RayHit bestHit) {
     if (bvhNodes.length() == 0) return;
     
-    // Stack optimisée
-    int stack[32];  // Revenir à 32 pour modèles complexes
+    // Stack simulée avec tableau fixe
+    int stack[32];
     int stackPtr = 0;
-    stack[stackPtr++] = 0;
+    stack[stackPtr++] = 0; // Commencer par le root (nœud 0)
     
     while (stackPtr > 0) {
         int nodeIndex = stack[--stackPtr];
         BVHNode node = bvhNodes[nodeIndex];
         
-        // Test AABB - SEUL early exit sûr
+        // Tester intersection avec la boîte
         if (!intersectAABB(ray, node.boxMin.xyz, node.boxMax.xyz)) {
-            continue;
+            continue; // Pas d'intersection, skip ce nœud
         }
         
-        // Feuille ?
-        if (node.nodeData.x == -1 && node.nodeData.y == -1) {
+        // Vérifier si c'est une feuille
+        if (node.nodeData.x == -1) { // leftChild == -1 = feuille
+            // Tester les triangles de cette feuille
             int triangleStart = node.nodeData.z;
             int triangleCount = node.nodeData.w;
             
-            // Tester TOUS les triangles de la feuille
             for (int i = 0; i < triangleCount; i++) {
                 int triangleIndex = triangleStart + i;
                 if (triangleIndex < triangles.length()) {
@@ -218,8 +192,8 @@ void intersectBVH(Ray ray, inout RayHit bestHit) {
                 }
             }
         } else {
-            // Éviter stack overflow
-            if (stackPtr < 30) {
+            // Nœud interne, ajouter les enfants à la stack
+            if (stackPtr < 30) { // Éviter overflow
                 stack[stackPtr++] = node.nodeData.y; // rightChild
                 stack[stackPtr++] = node.nodeData.x; // leftChild
             }
@@ -248,7 +222,6 @@ RayHit trace(Ray ray) {
     //}
 
      intersectBVH(ray, bestHit);
-     return bestHit;
 }
 
 vec3 shade(inout Ray ray, RayHit hit) {
@@ -261,23 +234,15 @@ vec3 shade(inout Ray ray, RayHit hit) {
         ray.direction = reflect(ray.direction, hit.normal);
         ray.energy *= hit.specular;
 
-       
-     // ÉCLAIRAGE ADAPTATIF selon le type d'objet
-float lighting;
-
-// Détecter si c'est un triangle
-bool isTriangle = (hit.albedo.x > 0.5 && hit.albedo.y > 0.2 && hit.albedo.y < 0.8 && hit.albedo.z < 0.5);
-
-if (isTriangle) {
-    // ÉCLAIRAGE CORRIGÉ pour triangles (normales inversées)
-    lighting = clamp(dot(-hit.normal, settings.directionalLight.xyz) * -1, 0.0f, 1.0f);
-} else {
-    // ÉCLAIRAGE NORMAL pour sphères/plans
-    lighting = clamp(dot(hit.normal, settings.directionalLight.xyz) * -1, 0.0f, 1.0f);
+        Ray shadowRay = createRay(hit.position + hit.normal * 0.001f, -1 * settings.directionalLight.xyz);
+        RayHit shadowHit = trace(shadowRay);
+        
+        // IGNORER les ombres causées par les triangles
+       if (shadowHit.distance != FLOAT_MAX) {
+    return vec3(0.0f, 0.0f, 0.0f);  // Ombre normale
 }
 
-return lighting * settings.directionalLight.w * hit.albedo;
-        
+        return clamp(dot(hit.normal, settings.directionalLight.xyz) * -1, 0.0f, 1.0f) * settings.directionalLight.w * hit.albedo;
     } else {
         ray.energy *= 0.0f;
         
