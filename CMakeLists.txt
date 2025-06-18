@@ -27,12 +27,14 @@ add_custom_target(shaders ALL DEPENDS ${SPV_SHADERS})
 
 include_directories(src/)
 include_directories(third_party/stb/)
+include_directories(third_party/tinyobjloader/)
 
 add_executable(vulkan_ray_tracer 
     src/main.cpp
     src/vrt_camera.cpp
     src/vrt_ray_tracer.cpp
     src/vrt_window.cpp
+    src/mesh_loader.cpp
 )
 
 target_link_libraries(vulkan_ray_tracer Vulkan::Vulkan glfw)

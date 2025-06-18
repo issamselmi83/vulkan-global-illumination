@@ -171,6 +171,9 @@ namespace vrt {
 			VkBuffer planeBuffer;
 			VkDeviceMemory planeMemory;
 
+			VkBuffer triangleBuffer;
+			VkDeviceMemory triangleBufferMemory;
+
 			Settings settings;
 			VkBuffer settingBuffer;	// Uniform Buffer Object (UBO)
 			VkDeviceMemory settingMemory;

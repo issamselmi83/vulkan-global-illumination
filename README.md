@@ -32,6 +32,19 @@ cmake ..
 ./vulkan_ray_tracer
 ```
 
+## Navigation (Contrôles caméra)
+
+| Touche | Action |
+| ------ | ------ |
+| **↑ / ↓** | Incliner la vue vers le haut / bas |
+| **← / →** | Pivoter la vue à gauche / droite |
+| **Z / S** | Avancer / Reculer |
+| **Q / D** | Déplacement latéral gauche / droite |
+| **Espace** | Monter |
+| **Shift Gauche** | Descendre |
+> ℹ️ Les touches ci-dessus correspondent au comportement défini dans `Camera::move`.  
+> Vous pouvez facilement modifier ou étendre ces contrôles dans ce même fichier.
+
 ## Screenshot
 
 ![Prototype Screenshot](raytracing.png)

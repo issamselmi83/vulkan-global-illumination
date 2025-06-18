@@ -530,8 +530,6 @@ namespace vrt {
 		vkMapMemory(_logicalDevice, _scene.settingMemory, 0, sizeof(Settings), 0, &_scene.settingHandle);
 		
 		std::vector<Sphere> spheres;
-
-		auto sphereCol = vrt::get(vrt::MaterialPreset::Ruby);
 /*
 		// Spheres random
 		const int SpheresMax = 500; 
@@ -598,10 +596,11 @@ namespace vrt {
 			// 5) Add to list
 			spheres.push_back(sphere);
 		}
-*/
-		// Spheres alignées
-		for (int i = 0; i < 5; i++) {
-			for (int j = 0; j < 5; j++) {
+		*/
+	// Spheres alignées
+	for (int i = 0; i < 5; i++) {
+		for (int j = 0; j < 5; j++) {
+				auto sphereCol = vrt::get(randomPreset());
 				Sphere sphere{};
 				sphere.radius = 2.0f;
 				sphere.position = { i * 7, 1.0f, j * 7 };
@@ -617,10 +616,10 @@ namespace vrt {
 	
 		glm::vec3 x = { -1, 0, 0 };
 
-		auto mat = vrt::get(vrt::MaterialPreset::PlasticYellow);
+		auto mat = vrt::get(randomPreset());
 
 		std::vector<Plane> planes = {
-			{ { 0.0f, -1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, mat.specular, mat.specular },
+			{ { 0.0f, -1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, mat.albedo, mat.specular },
 		};
 
 		VkDeviceSize planesBufferSize = planes.size() * sizeof(Plane);
