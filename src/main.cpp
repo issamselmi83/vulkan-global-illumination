@@ -33,7 +33,6 @@ int main() {
         settings.transform = camera.getWorldTransform();
         settings.angle += elapsed * 0.8f;
 
-        lightAngle += elapsed * 0.5f;
         lightDirection = glm::normalize(glm::vec3(cos(lightAngle), -2.0f, sin(lightAngle)));
         settings.directionalLight = { lightDirection, 1.0f };
 
