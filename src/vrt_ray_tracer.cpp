@@ -14,6 +14,7 @@
 #include<string>
 #include <cstring>
 #include <iostream>
+#include "material_presets.hpp"
 
 namespace vrt {
 	std::string RayTracer::SHADER_VERTEX_PATH;
@@ -551,12 +552,16 @@ namespace vrt {
 	void RayTracer::createStorageBuffers() {
 		createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, sizeof(Settings), _scene.settingBuffer, _scene.settingMemory);
 		vkMapMemory(_logicalDevice, _scene.settingMemory, 0, sizeof(Settings), 0, &_scene.settingHandle);
+		
+		std::vector<Sphere> spheres;
 
+		auto sphereCol = vrt::get(vrt::MaterialPreset::Ruby);
+/*
+		// Spheres random
 		const int SpheresMax = 500; 
 		const glm::vec2 SphereRadius = glm::vec2(1.0f, 5.0f);
 		const float SpherePlacementRadius = 10.0f;
 
-		std::vector<Sphere> spheres;
 		spheres.reserve(SpheresMax);
 
 		// Set up a random‐number generator:
@@ -617,14 +622,29 @@ namespace vrt {
 			// 5) Add to list
 			spheres.push_back(sphere);
 		}
+*/
+		// Spheres alignées
+		for (int i = 0; i < 5; i++) {
+			for (int j = 0; j < 5; j++) {
+				Sphere sphere{};
+				sphere.radius = 2.0f;
+				sphere.position = { i * 7, 1.0f, j * 7 };
+				sphere.albedo = sphereCol.albedo;
+				sphere.specular = sphereCol.specular;
+
+				spheres.push_back(sphere);
+			}
+		}
 
 		VkDeviceSize spheresBufferSize = spheres.size() * sizeof(Sphere);
 		createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, spheresBufferSize, _scene.sphereBuffer, _scene.sphereMemory, spheres.data());
 	
 		glm::vec3 x = { -1, 0, 0 };
 
+		auto mat = vrt::get(vrt::MaterialPreset::PlasticYellow);
+
 		std::vector<Plane> planes = {
-			{ { 0.0f, -1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, {1.0f, 1.0f, 1.0f}, {0.1f, 0.1f, 0.1f} },
+			{ { 0.0f, -1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, mat.specular, mat.specular },
 		};
 
 		VkDeviceSize planesBufferSize = planes.size() * sizeof(Plane);

@@ -17,7 +17,7 @@ int main() {
     settings.projection = camera.getProjectionMatrix();
     settings.directionalLight = { lightDirection, 1.0f };
 
-    float lightAngle = 10.0f;
+    float lightAngle = 0.0f;
 
     std::cout << "Init done!" << std::endl;
 
@@ -32,6 +32,9 @@ int main() {
         camera.move(window.getWindowHandle(), elapsed);
         settings.transform = camera.getWorldTransform();
         settings.angle += elapsed * 0.8f;
+
+        lightDirection = glm::normalize(glm::vec3(cos(lightAngle), -2.0f, sin(lightAngle)));
+        settings.directionalLight = { lightDirection, 1.0f };
 
         if (!window.isMinimized()) {
             rayTracer.updateSettings(settings);
