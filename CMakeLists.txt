@@ -29,12 +29,14 @@ add_subdirectory(src/)
 
 include_directories(src/)
 include_directories(third_party/stb/)
+include_directories(third_party/tinyobjloader/)
 
 add_executable(vulkan_ray_tracer 
     src/main.cpp
     src/vrt_camera.cpp
     src/vrt_ray_tracer.cpp
     src/vrt_window.cpp
+    src/mesh_loader.cpp
 )
 
 # This customized command runs a command to compile the shaders at compiling time.
