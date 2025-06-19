@@ -94,7 +94,7 @@ namespace vrt {
 		void createStorageBuffer(VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkDeviceSize size, VkBuffer& buffer, VkDeviceMemory& bufferMemory, void* data);
 
 		void loadShaderModule(const char* path, VkShaderModule& shaderModule);
-        std::vector<Triangle> loadOBJModel(const std::string& filename, glm::vec3 color = glm::vec3(1.0f, 1.0f, 0.0f));
+        std::vector<Triangle> loadOBJModel(const std::string& filename, glm::vec3 color = glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3 position = glm::vec3(0.0f));
 		void buildBVH();
 		int buildBVHRecursive(std::vector<int>& triangleIndices, int depth);
 		int buildBVHWithReorganization(std::vector<int>& indices, const std::vector<Triangle>& original, int depth);  

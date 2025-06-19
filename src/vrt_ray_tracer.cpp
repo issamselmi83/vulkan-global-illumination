@@ -556,54 +556,93 @@ namespace vrt {
 	}
 
 	void RayTracer::createStorageBuffers() {
-		createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, sizeof(Settings), _scene.settingBuffer, _scene.settingMemory);
-		vkMapMemory(_logicalDevice, _scene.settingMemory, 0, sizeof(Settings), 0, &_scene.settingHandle);
+    createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, sizeof(Settings), _scene.settingBuffer, _scene.settingMemory);
+    vkMapMemory(_logicalDevice, _scene.settingMemory, 0, sizeof(Settings), 0, &_scene.settingHandle);
 
-		    // 1) Build exactly one sphere:
-		std::vector<Sphere> spheres;
-		Sphere sphere{};
-		sphere.radius   = 2.0f;
-		sphere.position = { 0.0f, 1.0f, 0.0f };
+    // 1) Build exactly one sphere:
+    std::vector<Sphere> spheres;
+    Sphere sphere{};
+    sphere.radius   = 2.0f;
+    sphere.position = { 0.0f, 1.0f, 0.0f };
+    sphere.albedo   = { 1.0f, 0.0f, 0.0f };
+    sphere.specular = { 0.0f, 0.0f, 0.0f };
+    spheres.push_back(sphere);
 
-		// Give it a solid diffuse color (e.g., red):
-		sphere.albedo   = { 1.0f, 0.0f, 0.0f };
+    VkDeviceSize spheresBufferSize = spheres.size() * sizeof(Sphere);
+    createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, spheresBufferSize, _scene.sphereBuffer, _scene.sphereMemory, spheres.data());
 
-		// Zero out specular so no reflections come through:
-		sphere.specular = { 0.0f, 0.0f, 0.0f };
+    glm::vec3 x = { -1, 0, 0 };
+    std::vector<Plane> planes = {
+        { { 0.0f, -1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, {1.0f, 1.0f, 1.0f}, {0.1f, 0.1f, 0.1f} },
+    };
 
-		spheres.push_back(sphere);
+    VkDeviceSize planesBufferSize = planes.size() * sizeof(Plane);
+    createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, planesBufferSize, _scene.planeBuffer, _scene.planeMemory, planes.data());
 
-
-		VkDeviceSize spheresBufferSize = spheres.size() * sizeof(Sphere);
-		createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, spheresBufferSize, _scene.sphereBuffer, _scene.sphereMemory, spheres.data());
-	
-		glm::vec3 x = { -1, 0, 0 };
-
-		std::vector<Plane> planes = {
-			{ { 0.0f, -1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, {1.0f, 1.0f, 1.0f}, {0.1f, 0.1f, 0.1f} },
-		};
-
-		VkDeviceSize planesBufferSize = planes.size() * sizeof(Plane);
-		createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, planesBufferSize, _scene.planeBuffer, _scene.planeMemory, planes.data());
-	
-    
+    // === SYSTÈME DE CHARGEMENT FLEXIBLE ===
     try {
-    // Pyramide ROUGE
-    //auto pyramidTriangles = loadOBJModel("data/models/pyramid.obj", glm::vec3(1.0f, 0.2f, 0.2f));
-    //_scene.triangles = pyramidTriangles;
-    
-    // OU Teapot VERT
-     //auto teapotTriangles = loadOBJModel("data/models/teapot.obj", glm::vec3(0.2f, 1.0f, 0.3f));
-     //_scene.triangles = teapotTriangles;
-	 // CUBE JAUNE 
-	 auto cubeTriangles = loadOBJModel("data/models/cube.obj", glm::vec3(1.0f, 1.0f, 0.2f));
-	_scene.triangles = cubeTriangles;
+        _scene.triangles.clear();
+        
+        // === CONFIGURATION FLEXIBLE ===
+        bool loadCube = true;      
+        bool loadCone = false;
+        bool loadPyramid = false;
+        bool loadTeapot = false;
+        
+        // CHARGEMENT CONDITIONNEL
+if (loadCube) {
+    auto cubeTriangles = loadOBJModel("data/models/cube.obj", glm::vec3(1.0f, 1.0f, 0.2f), glm::vec3(-5.0f, 0.0f, 0.0f));
+    _scene.triangles.insert(_scene.triangles.end(), cubeTriangles.begin(), cubeTriangles.end());
+    std::cout << "Loaded cube: " << cubeTriangles.size() << " triangles" << std::endl;
+}
 
-	 // CÔNE ORANGE
-	 
-	//auto coneTriangles = loadOBJModel("data/models/Cone.obj", glm::vec3(1.0f, 0.5f, 0.1f));
-	//_scene.triangles = coneTriangles;
+if (loadCone) {
+    auto coneTriangles = loadOBJModel("data/models/Cone.obj", glm::vec3(1.0f, 0.5f, 0.1f), glm::vec3(5.0f, 0.0f, 0.0f)); 
+    _scene.triangles.insert(_scene.triangles.end(), coneTriangles.begin(), coneTriangles.end());
+    std::cout << "Loaded cone: " << coneTriangles.size() << " triangles" << std::endl;
+}
 
+if (loadPyramid) {
+    auto pyramidTriangles = loadOBJModel("data/models/pyramid.obj", glm::vec3(1.0f, 0.2f, 0.2f), glm::vec3(0.0f, 0.0f, 5.0f)); 
+    _scene.triangles.insert(_scene.triangles.end(), pyramidTriangles.begin(), pyramidTriangles.end());
+    std::cout << "Loaded pyramid: " << pyramidTriangles.size() << " triangles" << std::endl;
+}
+
+if (loadTeapot) {
+    auto teapotTriangles = loadOBJModel("data/models/teapot.obj", glm::vec3(0.2f, 1.0f, 0.3f), glm::vec3(0.0f, 0.0f, -5.0f));
+    _scene.triangles.insert(_scene.triangles.end(), teapotTriangles.begin(), teapotTriangles.end());
+    std::cout << "Loaded teapot: " << teapotTriangles.size() << " triangles" << std::endl;
+}
+        
+        // SÉCURITÉ : Si rien n'est chargé, charger un cube par défaut
+        if (_scene.triangles.empty()) {
+            auto defaultCube = loadOBJModel("data/models/cube.obj", glm::vec3(1.0f, 1.0f, 0.2f), glm::vec3(0.0f, 0.0f, 0.0f));
+            _scene.triangles = defaultCube;
+            std::cout << "No objects selected - loaded default cube: " << defaultCube.size() << " triangles" << std::endl;
+        }
+        
+        std::cout << "=== TOTAL TRIANGLES LOADED: " << _scene.triangles.size() << " ===" << std::endl;
+        
+        // Créer le buffer de triangles
+        if (!_scene.triangles.empty()) {
+            VkDeviceSize triangleBufferSize = _scene.triangles.size() * sizeof(Triangle);
+            
+            createStorageBuffer(
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                triangleBufferSize,
+                _scene.triangleBuffer,
+                _scene.triangleBufferMemory,
+                _scene.triangles.data()
+            );
+            
+            std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " << triangleBufferSize << std::endl;
+            
+            // Construire le BVH optimisé
+            buildBVH();
+            createBVHBuffer();
+        }
+        
     } catch (const std::exception& e) {
         std::cout << "Warning: " << e.what() << " - Using default triangle" << std::endl;
         Triangle defaultTriangle{};
@@ -613,19 +652,16 @@ namespace vrt {
         defaultTriangle.normal = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f);
         defaultTriangle.albedo = glm::vec4(0.2f, 0.4f, 0.8f, 0.0f);
         defaultTriangle.specular = glm::vec4(0.1f, 0.1f, 0.1f, 0.0f);
-        _scene.triangles.push_back(defaultTriangle);  // ← Changé en _scene.triangles
+        _scene.triangles.push_back(defaultTriangle);
+        
+        VkDeviceSize triangleBufferSize = _scene.triangles.size() * sizeof(Triangle);
+        createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, triangleBufferSize, _scene.triangleBuffer, _scene.triangleBufferMemory, _scene.triangles.data());
+        std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " << triangleBufferSize << std::endl;
+        
+        buildBVH();
+        createBVHBuffer();
     }
-    
-    VkDeviceSize triangleBufferSize = _scene.triangles.size() * sizeof(Triangle);
-    createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, triangleBufferSize, _scene.triangleBuffer, _scene.triangleBufferMemory, _scene.triangles.data());
-    std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " << triangleBufferSize << std::endl;
-    
-    
-    buildBVH();
-    createBVHBuffer();	
-
-	}
-
+}
 	void RayTracer::createDescriptorSets() {
 		std::vector<VkDescriptorPoolSize> descriptorPoolSizes = {
 			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 },
@@ -1641,15 +1677,7 @@ for (size_t i = 0; i < computeWriteDescriptorSets.size(); i++) {
 			throw std::runtime_error("Failed to create the shader module");
 		}
 	}
-// Dans vrt_ray_tracer.cpp, fonction loadOBJModel() optimisée
-
-// Dans vrt_ray_tracer.cpp, fonction loadOBJModel() optimisée
-
-// Dans vrt_ray_tracer.cpp, fonction loadOBJModel() optimisée
-
-// Nouvelle signature avec couleur
-
-std::vector<Triangle> RayTracer::loadOBJModel(const std::string& filename, glm::vec3 color) {
+std::vector<Triangle> RayTracer::loadOBJModel(const std::string& filename, glm::vec3 color, glm::vec3 position) {
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
@@ -1695,7 +1723,7 @@ std::vector<Triangle> RayTracer::loadOBJModel(const std::string& filename, glm::
 
                 triangles.push_back(triangle);
             } else if (fv == 4) {
-                // SUPPORTER LES QUADS (pour le diamant)
+                
                 // Diviser le quad en 2 triangles
                 
                 // Premier triangle (0,1,2)
@@ -1745,18 +1773,16 @@ std::vector<Triangle> RayTracer::loadOBJModel(const std::string& filename, glm::
         }
     }
 
-    // Position à gauche de la sphère  
+    // Position des triangles
     for (auto& triangle : triangles) {
-        triangle.v0.x -= 3.0f; triangle.v0.z -= 4.0f;
-        triangle.v1.x -= 3.0f; triangle.v1.z -= 4.0f;
-        triangle.v2.x -= 3.0f; triangle.v2.z -= 4.0f;
+        triangle.v0.x += position.x; triangle.v0.z += position.z; triangle.v0.y += position.y;
+        triangle.v1.x += position.x; triangle.v1.z += position.z; triangle.v1.y += position.y;
+        triangle.v2.x += position.x; triangle.v2.z += position.z; triangle.v2.y += position.y;
     }
 
     std::cout << "Loaded " << triangles.size() << " triangles from " << filename << std::endl;
     return triangles;
 }
-// REMPLACEZ complètement vos fonctions BVH par cette version ultra-optimisée :
-
 void RayTracer::buildBVH() {
     if (_scene.triangles.empty()) return;
     
@@ -1781,9 +1807,6 @@ void RayTracer::buildBVH() {
     
     std::cout << "HIGH-PERF BVH: " << _scene.bvhNodes.size() << " nodes, " 
               << _scene.triangles.size() << " triangles reorganized" << std::endl;
-    
-  
-    
     
     // CRUCIAL : Recréer le buffer GPU avec les triangles réorganisés 
     updateTriangleBuffer();
@@ -1886,6 +1909,7 @@ void RayTracer::updateTriangleBuffer() {
     
     std::cout << "Triangle buffer recreated: " << triangleBufferSize << " bytes" << std::endl;
 }
+
 void RayTracer::createBVHBuffer() {
     if (_scene.bvhNodes.empty()) return;
     
@@ -1902,6 +1926,6 @@ void RayTracer::createBVHBuffer() {
     
     std::cout << "BVH buffer created: size=" << bufferSize << " bytes" << std::endl;
 }
-
 }
+
 	
