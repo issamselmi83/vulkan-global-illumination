@@ -22,8 +22,8 @@ namespace vrt {
 		const glm::mat4& getProjectionMatrix() const;
 
 	private:
-		const float MOVE_SPEED = 10.0f;
-		const float LOOK_SPEED = 1.5f;
+		const float MOVE_SPEED = 2.0f;
+		const float LOOK_SPEED = 1.0f;
 
 		glm::mat4 _projection;
 

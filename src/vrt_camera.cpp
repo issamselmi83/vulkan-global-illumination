@@ -5,7 +5,7 @@
 namespace vrt {
     Camera::Camera(float fov, float aspect) : _position{ 0.0f }, _rotation{ 0.0f, 0.0f, 0.0f } {
 		const float tanHalfFOV = tan(glm::radians(fov) / 2.0f);
-		float far = 10.0f;
+		float far = 30.0f;
 		float near = 0.1f;
 
 		_projection = glm::mat4{ 0.0f };
@@ -16,7 +16,7 @@ namespace vrt {
 		_projection[3][2] = -(far * near) / (far - near);
 		_projection = glm::inverse(_projection);
 
-		_position = { 0.0f, 0.0f, 0.0f };
+		_position = { 10.0f, 10.0f, -20.0f };
 	}
 
     Camera::~Camera() { }
