@@ -3,7 +3,7 @@
 #include <stdexcept>
 
 namespace vrt {
-	Window::Window() {
+	Window::Window(bool fullscreen) {
 		if (glfwInit() != GLFW_TRUE) {
 			throw std::runtime_error("Unable to initialize GLFW");
 		}
@@ -11,7 +11,30 @@ namespace vrt {
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
-		_window = glfwCreateWindow(1024, 768, "Vulkan Ray Tracing", nullptr, nullptr);
+		if (fullscreen)
+		{
+			GLFWmonitor*        monitor = glfwGetPrimaryMonitor();
+			const GLFWvidmode*  mode    = glfwGetVideoMode(monitor);
+
+			// ask GLFW to use the monitor’s bit depth / refresh rate
+			glfwWindowHint(GLFW_RED_BITS,   mode->redBits);
+			glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
+			glfwWindowHint(GLFW_BLUE_BITS,  mode->blueBits);
+			glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+
+			_window = glfwCreateWindow(
+				mode->width, mode->height,
+				"Vulkan Ray Tracing",
+				monitor,     // <─ FULLSCREEN!
+				nullptr);
+		}
+		else
+		{
+			_window = glfwCreateWindow(
+				1024, 768,
+				"Vulkan Ray Tracing",
+				nullptr, nullptr);
+		}
 	}
 
 	Window::~Window() {

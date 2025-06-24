@@ -1,0 +1,312 @@
+#version 450
+
+#define PI 3.14159265
+#define FLOAT_MAX 3.402823466e+38
+
+#define ANTIALIASING_SAMPLES 2
+#define ANTIALIASING_QUASIRANDOM_SEED_A 0.7548776662
+#define ANTIALIASING_QUASIRANDOM_SEED_B 0.5698402911
+
+layout (local_size_x = 16, local_size_y = 16) in;
+layout (binding = 0) uniform samplerCube samplerSkybox;
+layout (binding = 1, rgba8) uniform writeonly image2D resultImage;
+
+layout (binding = 2) uniform Settings {
+	mat4 projection;   
+	mat4 transform;
+	
+	vec4 directionalLight;
+	
+	float angle;
+} settings; 
+
+struct Sphere {
+	vec3 position;
+	float radius;
+	vec3 albedo;
+	vec3 specular;
+    float alpha;
+};
+
+struct Plane {
+	vec3 position;
+	vec3 normal;
+	vec3 albedo;
+	vec3 specular;
+    float alpha;
+};
+
+struct Triangle {
+	vec4 v0;     // Changé de vec3 à vec4
+	vec4 v1;     // Changé de vec3 à vec4
+	vec4 v2;     // Changé de vec3 à vec4
+	vec4 normal; // Changé de vec3 à vec4
+	vec4 albedo; // Changé de vec3 à vec4
+	vec4 specular; // Changé de vec3 à vec4
+    float alpha;
+};
+
+layout (std430, binding = 5) buffer Triangles {
+    Triangle triangles[];
+};
+
+layout (std430, binding = 3) buffer Spheres {
+    Sphere spheres[];
+};
+
+layout (std430, binding = 4) buffer Planes {
+    Plane planes[];
+};
+
+struct Ray {
+	vec3 origin;
+	vec3 direction;
+	vec3 energy;
+};
+
+Ray createRay(vec3 origin, vec3 direction) {
+	return Ray(origin, direction, vec3(1.0f, 1.0f, 1.0f));
+}
+
+Ray createCameraRay(int rayIndex) {
+	vec2 quasiRandomOffset = rayIndex * vec2(ANTIALIASING_QUASIRANDOM_SEED_A, ANTIALIASING_QUASIRANDOM_SEED_B) + 0.5;
+	vec2 viewCoordinates = gl_GlobalInvocationID.xy + mod(quasiRandomOffset, 1.0f);
+
+	vec4 origin = settings.transform * vec4(0.0f, 0.0f, 0.0f, 1.0f);
+	vec4 direction = settings.transform * vec4((settings.projection * vec4(viewCoordinates / imageSize(resultImage) * 2.0f - 1.0f, 0.0f, 1.0f)).xyz, 0.0f);
+
+	return createRay(origin.xyz, normalize(direction.xyz));
+}
+
+struct RayHit {
+    float distance;
+    vec3 position;
+    vec3 normal;
+    vec3 albedo;
+    vec3 specular;
+    float alpha;
+};
+
+// ---------- RNG ----------------------------------------------------------
+// ★ 32-bit PCG hash : pas d’état global, pas de texture d’aléa
+uint pcg_hash(uint v) {
+    v = v * 747796405u + 2891336453u;
+    v ^= v >> 16;  v *= 2246822507u;
+    v ^= v >> 13;  v *= 3266489909u;
+    v ^= v >> 16;
+    return v;
+}
+
+float rand(inout uint state) {
+    state = pcg_hash(state);
+    return float(state) / 4294967296.0;   // [0,1)
+}
+
+// ---------- Tangent space -----------------------------------------------
+mat3 GetTangentSpace(vec3 n) {          // ★ renvoie une matrice 3×3
+    vec3 helper = abs(n.x) > 0.99 ? vec3(0,0,1) : vec3(1,0,0);
+    vec3 t = normalize(cross(n, helper));
+    vec3 b = cross(n, t);               // déjà normalisé
+    return mat3(t, b, n);               // colonnes = (T, B, N)
+}
+
+// ---------- Uniform hemisphere sample ------------------------------------
+vec3 SampleHemisphere(vec3 n, inout uint rng) {   // ★
+    float xi1 = rand(rng);
+    float xi2 = rand(rng);
+    float cosTheta = xi1;
+    float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+    float phi      = 2.0 * PI * xi2;
+
+    vec3 dirLocal = vec3(cos(phi) * sinTheta,
+                         sin(phi) * sinTheta,
+                         cosTheta);                 // +Z = normal
+    return GetTangentSpace(n) * dirLocal;           // monde
+}
+
+float sdot(vec3 a, vec3 b) { return clamp(dot(a,b), 0.0, 1.0); }
+
+float AnyPositive(vec3 v)  { return max(max(v.x,v.y),v.z); }      // pour roulette russe
+
+vec3 CosineSampleHemisphere(vec3 n, inout uint rng) {          // identique mais pdf = cos/π
+    float r1 = rand(rng), r2 = rand(rng);
+    float sinT = sqrt(1.0 - r1), cosT = sqrt(r1);
+    float phi  = 2.0 * PI * r2;
+    vec3 local = vec3(cos(phi)*sinT, sin(phi)*sinT, cosT);
+    return GetTangentSpace(n) * local;
+}
+
+vec3 PhongSample(vec3 r, float alpha, inout uint rng) {        // pdf = (α+1) (cosθ)^α / 2π
+    float r1 = rand(rng), r2 = rand(rng);
+    float cosT = pow(r1, 1.0 / (alpha + 1.0));
+    float sinT = sqrt(1.0 - cosT*cosT);
+    float phi  = 2.0 * PI * r2;
+    vec3 local = vec3(cos(phi)*sinT, sin(phi)*sinT, cosT);
+    return GetTangentSpace(r) * local;                         // r = “normal” du lobe
+}
+
+
+RayHit createRayHit() {
+	return RayHit(FLOAT_MAX, vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f), 300);
+}
+
+void intersectPlane(Ray ray, inout RayHit bestHit, Plane plane) {
+	float a = dot(ray.direction, plane.normal);
+	
+	if (a < 0) {
+		float t = dot(plane.position - ray.origin, plane.normal) / a;
+		
+		if (t > 0 && t < bestHit.distance) {
+			bestHit.distance = t;
+			bestHit.position = ray.origin + t * ray.direction;
+			bestHit.normal = plane.normal;
+			bestHit.albedo = plane.albedo;
+			bestHit.specular = plane.specular;
+		}
+	}
+}
+
+void intersectSphere(Ray ray, inout RayHit bestHit, Sphere sphere) {
+    vec3 d = ray.origin - sphere.position;
+    float p1 = -dot(ray.direction, d);
+    float p2sqr = p1 * p1 - dot(d, d) + sphere.radius * sphere.radius;
+    
+	if (p2sqr < 0) {
+        return;
+	}
+    
+	float p2 = sqrt(p2sqr);
+    float t = p1 - p2 > 0 ? p1 - p2 : p1 + p2;
+    
+	if (t > 0 && t < bestHit.distance) {
+        bestHit.distance = t;
+        bestHit.position = ray.origin + t * ray.direction;
+        bestHit.normal = normalize(bestHit.position - sphere.position);
+        bestHit.albedo = sphere.albedo;
+        bestHit.specular = sphere.specular;
+    }
+}
+
+void intersectTriangle(Ray ray, inout RayHit bestHit, Triangle triangle) {
+    const float EPSILON = 0.000001;  // Plus élevé pour plus d'optimisation
+    
+    vec3 edge1 = triangle.v1.xyz - triangle.v0.xyz;
+    vec3 edge2 = triangle.v2.xyz - triangle.v0.xyz;
+    vec3 h = cross(ray.direction, edge2);
+    float a = dot(edge1, h);
+    
+    // EARLY EXIT 1 : Backface culling plus agressif
+    if (abs(a) < EPSILON) return;
+    
+    float f = 1.0 / a;
+    vec3 s = ray.origin - triangle.v0.xyz;
+    float u = f * dot(s, h);
+    
+    // EARLY EXIT 2 : Test u optimisé
+    if (u < 0.0 || u > 1.0) return;
+    
+    vec3 q = cross(s, edge1);
+    float v = f * dot(ray.direction, q);
+    
+    // EARLY EXIT 3 : Test v optimisé  
+    if (v < 0.0 || u + v > 1.0) return;
+    
+    float t = f * dot(edge2, q);
+    
+    // EARLY EXIT 4 : Test distance plus tôt
+    if (t <= EPSILON || t >= bestHit.distance) return;
+    
+    // Seulement maintenant, faire les calculs
+    bestHit.distance = t;
+    bestHit.position = ray.origin + t * ray.direction;
+    bestHit.normal = triangle.normal.xyz;
+    bestHit.albedo = triangle.albedo.xyz;  // Vraie couleur du triangle
+    bestHit.specular = vec3(0.6, 0.6, 0.6);
+}
+
+RayHit trace(Ray ray) {
+    RayHit bestHit = createRayHit();
+
+	for (int i = 0; i < planes.length(); i++) {
+		intersectPlane(ray, bestHit, planes[i]);
+	}
+
+    for (int i = 0; i < spheres.length(); i++) {
+		Sphere sphere = spheres[i];
+		sphere.position += vec3(0.0f, 1.0f + sin(settings.angle + i), 0.0f);
+	
+        intersectSphere(ray, bestHit, sphere);
+    }
+
+	    // TEST TRIANGLE : Forcer directement un hit jaune
+     // Triangles avec limitation à 4 max
+    for (int i = 0; i < triangles.length(); i++) {
+    intersectTriangle(ray, bestHit, triangles[i]);
+}
+
+    return bestHit;
+}
+
+vec3 shade(inout Ray ray, RayHit hit, inout uint rng)
+{
+    if (hit.distance == FLOAT_MAX) {
+        return ray.energy * texture(samplerSkybox, ray.direction).rgb;
+    }
+
+    // ----- choix diffuse/specular -------------------------------------
+    float ks     = AnyPositive(hit.specular);   // intensité spéculaire max  [0,1]
+    float kdProb = 1.0 - ks;                    // proba de lobe Lambert
+    float xi     = rand(rng);
+
+    vec3  newDir;
+    float pdf;                                  // pour la pondération MIS
+    vec3  fr;                                   // BRDF valeur
+
+    if (xi < kdProb || ks < 1e-4) {             // Lambert
+        newDir = CosineSampleHemisphere(hit.normal, rng);
+        pdf    = sdot(hit.normal, newDir) / PI;
+        fr     = hit.albedo / PI;
+    } else {                                    // Phong “shininess” (= α)
+        vec3  refl = reflect(ray.direction, hit.normal);
+        newDir = PhongSample(refl, hit.alpha, rng);
+        float cosAlpha = sdot(refl, newDir);
+        pdf  = (hit.alpha + 1.0) * pow(cosAlpha, hit.alpha) / (2.0 * PI);
+        fr   = hit.specular * (hit.alpha + 2.0) * pow(cosAlpha, hit.alpha) / (2.0 * PI);
+    }
+
+    // ----- mise à jour du rayon ---------------------------------------
+    float cosIn = sdot(hit.normal, newDir);           // |n·wi|
+    ray.origin  = hit.position + hit.normal * 0.001;
+    ray.direction = newDir;
+    ray.energy *= fr * cosIn / pdf;                   // multiple importance (ici simple)
+
+    // ----- roulette russe pour limiter les rebonds --------------------
+    if (rand(rng) > AnyPositive(ray.energy)) {
+        ray.energy = vec3(0.0);
+    }
+
+    return vec3(0.0);                                 // pas d’émission
+}
+
+
+void main() {
+    vec3  result = vec3(0.0);
+    uvec2 pixel  = gl_GlobalInvocationID.xy;
+
+    for (int s = 0; s < ANTIALIASING_SAMPLES; ++s) {
+        // ---------- graine PCG pour ce rayon ----------------------------
+        uint rng = pcg_hash( pixel.x ^ (pixel.y << 10) ^ (s << 20)   // px-py-sample
+                             ^ uint(settings.angle * 1000.0) );      // time/angle
+
+        Ray ray = createCameraRay(s);          // ← tu peux y passer rng si besoin
+
+        for (int bounce = 0; bounce < 3; ++bounce) {
+            RayHit h = trace(ray);
+            result  += shade(ray, h, rng);
+            if (AnyPositive(ray.energy) == 0.0) break;
+        }
+    }
+
+    imageStore(resultImage, ivec2(pixel),
+               vec4(result / float(ANTIALIASING_SAMPLES), 1.0));
+}

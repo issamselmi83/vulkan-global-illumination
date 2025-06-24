@@ -7,7 +7,7 @@
 namespace vrt {
 	class Window {
 	public:
-		Window();
+		explicit Window(bool fullscreen = false);
 		~Window();
 
 		void createWindowSurface(VkInstance instance, VkSurfaceKHR* surface);
@@ -19,7 +19,7 @@ namespace vrt {
 		GLFWwindow* getWindowHandle() const { return _window; }
 
 	private:
-		GLFWwindow* _window;
+		GLFWwindow* _window = nullptr;
 	};
 }
 

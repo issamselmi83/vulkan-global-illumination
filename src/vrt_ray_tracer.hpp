@@ -7,6 +7,8 @@
 
 #include <vector>
 
+#include <string>
+
 namespace vrt {
 	struct Settings {
 		alignas(16) glm::mat4 projection;
@@ -21,6 +23,8 @@ namespace vrt {
 		float radius;
 		glm::vec3 albedo;
 		alignas(16) glm::vec3 specular;
+		float smoothness; 
+		alignas(16) glm::vec3 emission;
 	};
 
 	struct Plane {
@@ -28,6 +32,23 @@ namespace vrt {
 		alignas(16) glm::vec3 normal;
 		alignas(16) glm::vec3 albedo;
 		alignas(16) glm::vec3 specular;
+	};
+
+	struct Triangle {
+		alignas(16) glm::vec4 v0; 
+		alignas(16) glm::vec4 v1; 
+		alignas(16) glm::vec4 v2; 
+		alignas(16) glm::vec4 normal; 
+		alignas(16) glm::vec4 albedo; 
+		alignas(16) glm::vec4 specular; 
+
+		
+	};
+
+	struct BVHNode {
+		alignas(16) glm::vec4 boxMin;
+		alignas(16) glm::vec4 boxMax;
+		alignas(16) glm::ivec4 nodeData;
 	};
 
 	class RayTracer {
@@ -80,7 +101,14 @@ namespace vrt {
 
 		void loadShaderModule(const char* path, VkShaderModule& shaderModule);
 
-	private:
+				void buildBVH();
+		int buildBVHRecursive(std::vector<int>& triangleIndices, int depth);
+		int buildBVHWithReorganization(std::vector<int>& indices, const std::vector<Triangle>& original, int depth);  
+        void updateTriangleBuffer(); 
+		glm::vec3 getTriangleMin(int triangleIndex);
+		glm::vec3 getTriangleMax(int triangleIndex);
+		void createBVHBuffer();	
+		private:
 		const std::vector<const char*> REQUIRED_EXTENSION_PROPERTIES{
 			VK_KHR_SWAPCHAIN_EXTENSION_NAME
 		};
@@ -173,6 +201,13 @@ namespace vrt {
 
 			VkBuffer triangleBuffer;
 			VkDeviceMemory triangleBufferMemory;
+
+
+			std::vector<Triangle> triangles;
+
+			std::vector<BVHNode> bvhNodes;
+    		VkBuffer bvhBuffer;
+   			VkDeviceMemory bvhBufferMemory;
 
 			Settings settings;
 			VkBuffer settingBuffer;	// Uniform Buffer Object (UBO)

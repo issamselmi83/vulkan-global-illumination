@@ -1,4 +1,5 @@
 #include "vrt_ray_tracer.hpp"
+#include "mesh_loader.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
@@ -10,11 +11,17 @@
 #include <set>
 #include <cmath>
 #include <random>
+#include <iostream>
+#include <chrono>
+#include <algorithm>
+
 #include "material_presets.hpp"
 
+#
+
 namespace vrt {
-	const char* RayTracer::SHADER_VERTEX_PATH = "shaders/rendering.vert.spv";
-	const char* RayTracer::SHADER_FRAGMENT_PATH = "shaders/rendering.frag.spv";
+	const char* RayTracer::SHADER_VERTEX_PATH = "shaders/shader.vert.spv";
+	const char* RayTracer::SHADER_FRAGMENT_PATH = "shaders/shader.frag.spv";
 	const char* RayTracer::SHADER_COMPUTE_PATH = "shaders/ray_tracing.comp.spv";
 
 	const char* RayTracer::SKY_BOX_TEXTURE_PATHS[6] = {
@@ -75,6 +82,22 @@ namespace vrt {
 		vkFreeMemory(_logicalDevice, _scene.settingMemory, nullptr);
 		vkDestroyBuffer(_logicalDevice, _scene.settingBuffer, nullptr);
 
+
+		if (_scene.triangleBuffer != VK_NULL_HANDLE) {
+		vkDestroyBuffer(_logicalDevice, _scene.triangleBuffer, nullptr);
+		}
+		if (_scene.triangleBufferMemory != VK_NULL_HANDLE) {
+		vkFreeMemory(_logicalDevice, _scene.triangleBufferMemory, nullptr);
+		}
+		
+		if (_scene.bvhBuffer != VK_NULL_HANDLE) {
+		vkDestroyBuffer(_logicalDevice, _scene.bvhBuffer, nullptr);
+		}
+		if (_scene.bvhBufferMemory != VK_NULL_HANDLE) {
+		vkFreeMemory(_logicalDevice, _scene.bvhBufferMemory, nullptr);
+		}
+		
+
 		vkDestroyImageView(_logicalDevice, _skyBox.imageView, nullptr);
 		vkDestroyImage(_logicalDevice, _skyBox.image, nullptr);
 		vkFreeMemory(_logicalDevice, _skyBox.imageDeviceMemory, nullptr);
@@ -108,6 +131,21 @@ namespace vrt {
 	}
 
 	void RayTracer::drawFrame() {
+		static auto lastTime = std::chrono::high_resolution_clock::now();
+		static int frameCount = 0;
+		static float fps = 0.0f;
+		
+		frameCount++;
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		auto duration = std::chrono::duration<float>(currentTime - lastTime).count();
+		
+		if (duration >= 1.0f) { // Chaque seconde
+			fps = frameCount / duration;
+			//std::cout << "FPS: " << (int)fps << " | Frame time: " << (1000.0f/fps) << "ms" << std::endl;
+			frameCount = 0;
+			lastTime = currentTime;
+		}
+
 		VkSubmitInfo computeSubmitInfo{};
 		computeSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		computeSubmitInfo.commandBufferCount = 1;
@@ -520,7 +558,7 @@ namespace vrt {
 		vkCmdCopyBufferToImage(copyCommandBuffer, stagingBuffer, _skyBox.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bufferImageCopy);
 		submitCommandBuffers(_graphics.commandPool, _graphics.queue, &copyCommandBuffer);
 		changeImageLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, _skyBox.image, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, 6);
-	
+		
 		vkFreeMemory(_logicalDevice, stagingMemory, nullptr);
 		vkDestroyBuffer(_logicalDevice, stagingBuffer, nullptr);
 	}
@@ -529,11 +567,12 @@ namespace vrt {
 		createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, sizeof(Settings), _scene.settingBuffer, _scene.settingMemory);
 		vkMapMemory(_logicalDevice, _scene.settingMemory, 0, sizeof(Settings), 0, &_scene.settingHandle);
 		
-		std::vector<Sphere> spheres;
 /*
+		std::vector<Sphere> spheres;
+
 		// Spheres random
-		const int SpheresMax = 500; 
-		const glm::vec2 SphereRadius = glm::vec2(1.0f, 5.0f);
+		const int SpheresMax = 50; 
+		const glm::vec2 SphereRadius = glm::vec2(0.5f, 3.0f);
 		const float SpherePlacementRadius = 10.0f;
 
 		spheres.reserve(SpheresMax);
@@ -596,27 +635,116 @@ namespace vrt {
 			// 5) Add to list
 			spheres.push_back(sphere);
 		}
-		*/
-	// Spheres alignées
-	for (int i = 0; i < 5; i++) {
-		for (int j = 0; j < 5; j++) {
+
+
+		std::vector<Sphere> spheres;
+		const int   SpheresMax            = 120;
+		const float Rinner                = 3.0f;
+		const float Router                = 10.0f;
+		const glm::vec2 RadiusRange       = {0.25f, 1.5f};
+
+		spheres.reserve(SpheresMax);
+		
+		// RNG
+		std::random_device rd;
+		std::mt19937       gen(rd());
+		std::uniform_real_distribution<float> rand01(0.0f, 1.0f);
+
+		// helpers ----------------------------------------------------------------
+		auto randomPointInRing = [&]() -> glm::vec2 {
+			float r2 = rand01(gen);
+			float r  = std::sqrt(Rinner*Rinner + r2 * (Router*Router - Rinner*Rinner));
+			float t  = rand01(gen) * 2.0f * glm::pi<float>();
+			return {r*std::cos(t), r*std::sin(t)};
+		};
+
+		auto isMetallic = [](const glm::vec3& spec) -> bool {
+			// notre convention : “métal” si specular ≠ 0.04 constant
+			return glm::distance(spec, glm::vec3(0.04f)) > 1e-3f;
+		};
+
+		// ------------------------------------------------------------------------
+		while (static_cast<int>(spheres.size()) < SpheresMax)
+		{
+			Sphere s{};
+
+			// Rayon (plus petit au centre)
+			float k  = rand01(gen);
+			s.radius = glm::mix(RadiusRange.x, RadiusRange.y, k*k);
+
+			// Position (XZ)
+			glm::vec2 p2d = randomPointInRing();
+			s.position    = {p2d.x, s.radius, p2d.y};
+
+			// Collision simple
+			bool collides = false;
+			for (const auto& o : spheres) {
+				float minD = s.radius + o.radius;
+				glm::vec3 d = s.position - o.position;
+				if (glm::dot(d,d) < minD*minD) { collides = true; break; }
+			}
+			if (collides) continue;
+
+			// ---------- matériau depuis le preset -------------------------------
+			auto  preset = vrt::randomPreset();        // tirage uniforme
+			auto  mat    = vrt::get(preset);           // {albedo,specular}
+
+			s.albedo   = mat.albedo;
+			s.specular = mat.specular;
+
+			bool metal = isMetallic(s.specular);
+
+			// Smoothness : métal plutôt lisse, diélectrique plus variable
+			s.smoothness = metal ? glm::mix(0.6f, 1.0f, rand01(gen))
+								: glm::mix(0.0f, 0.8f, rand01(gen));
+
+			// ---------- émissifs aléatoires -------------------------------------
+			const float lampChance = 0.18f;
+			if (rand01(gen) < lampChance) {
+				// on transforme la sphère en petite “ampoule” :
+				s.emission   = s.albedo * glm::mix(2.0f, 10.0f, rand01(gen));
+				s.albedo     = glm::vec3(0.0f);
+				s.specular   = glm::vec3(0.0f);
+				s.smoothness = 0.0f;
+			} else {
+				s.emission = glm::vec3(0.0f);
+			}
+
+			spheres.push_back(s);
+		}
+		
+		// Spheres alignées
+		for (int i = 0; i < 5; i++) {
+			for (int j = 0; j < 5; j++) {
 				auto sphereCol = vrt::get(randomPreset());
 				Sphere sphere{};
 				sphere.radius = 2.0f;
 				sphere.position = { i * 7, 1.0f, j * 7 };
 				sphere.albedo = sphereCol.albedo;
 				sphere.specular = sphereCol.specular;
-
+				
 				spheres.push_back(sphere);
 			}
 		}
+		*/
+	std::vector<Sphere> spheres;
+
+	// 1) Build exactly one sphere:
+	Sphere sphere{};	
+	auto sphereCol = vrt::get(randomPreset());
+	sphere.radius   = 2.0f;
+	sphere.position = { 0.0f, 1.0f, 0.0f };
+	sphere.albedo   = sphereCol.albedo;
+	sphere.specular = sphereCol.specular;
+	spheres.push_back(sphere);
+	
 
 		VkDeviceSize spheresBufferSize = spheres.size() * sizeof(Sphere);
 		createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, spheresBufferSize, _scene.sphereBuffer, _scene.sphereMemory, spheres.data());
 	
 		glm::vec3 x = { -1, 0, 0 };
 
-		auto mat = vrt::get(randomPreset());
+		auto mat = vrt::get(vrt::MaterialPreset::GlassBlue);
 
 		std::vector<Plane> planes = {
 			{ { 0.0f, -1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, mat.albedo, mat.specular },
@@ -624,6 +752,85 @@ namespace vrt {
 
 		VkDeviceSize planesBufferSize = planes.size() * sizeof(Plane);
 		createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, planesBufferSize, _scene.planeBuffer, _scene.planeMemory, planes.data());
+		    // === SYSTÈME DE CHARGEMENT FLEXIBLE ===
+    try {
+        _scene.triangles.clear();
+        
+        // === CONFIGURATION FLEXIBLE ===
+        bool loadCube = true;      
+        bool loadCone = true;
+        bool loadPyramid = false;
+        bool loadTeapot = false;
+        
+        // CHARGEMENT CONDITIONNEL
+	if (loadCube) {
+		auto randomCol = vrt::get(randomPreset());
+		auto cubeTriangles = mesh::loadOBJModel("../data/models/sphere20.obj", randomCol.albedo, glm::vec3(-5.0f, 0.0f, 0.0f));
+		_scene.triangles.insert(_scene.triangles.end(), cubeTriangles.begin(), cubeTriangles.end());
+		std::cout << "Loaded cube: " << cubeTriangles.size() << " triangles" << std::endl;
+	}
+
+	if (loadCone) {
+		auto randomCol = vrt::get(randomPreset());
+		auto coneTriangles = mesh::loadOBJModel("../data/models/icosa.obj", glm::vec3(1.0f, 0.5f, 0.1f), glm::vec3(5.0f, 5.0f, 0.0f)); 
+		_scene.triangles.insert(_scene.triangles.end(), coneTriangles.begin(), coneTriangles.end());
+		std::cout << "Loaded cone: " << coneTriangles.size() << " triangles" << std::endl;
+	}
+
+	if (loadPyramid) {
+		auto randomCol = vrt::get(randomPreset());
+		auto pyramidTriangles = mesh::loadOBJModel("../data/models/pyramid.obj", glm::vec3(1.0f, 0.2f, 0.2f), glm::vec3(0.0f, 0.0f, 5.0f)); 
+		_scene.triangles.insert(_scene.triangles.end(), pyramidTriangles.begin(), pyramidTriangles.end());
+		std::cout << "Loaded pyramid: " << pyramidTriangles.size() << " triangles" << std::endl;
+	}
+
+	if (loadTeapot) {
+		auto randomCol = vrt::get(randomPreset());
+		auto teapotTriangles = mesh::loadOBJModel("../data/models/epcot.obj", glm::vec3(0.2f, 1.0f, 0.3f), glm::vec3(0.0f, 0.0f, -5.0f));
+		_scene.triangles.insert(_scene.triangles.end(), teapotTriangles.begin(), teapotTriangles.end());
+		std::cout << "Loaded teapot: " << teapotTriangles.size() << " triangles" << std::endl;
+	}
+			
+			std::cout << "=== TOTAL TRIANGLES LOADED: " << _scene.triangles.size() << " ===" << std::endl;
+			
+			// Créer le buffer de triangles
+			if (!_scene.triangles.empty()) {
+				VkDeviceSize triangleBufferSize = _scene.triangles.size() * sizeof(Triangle);
+				
+				createStorageBuffer(
+					VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+					triangleBufferSize,
+					_scene.triangleBuffer,
+					_scene.triangleBufferMemory,
+					_scene.triangles.data()
+				);
+				
+				std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " << triangleBufferSize << std::endl;
+				
+				// Construire le BVH optimisé
+				buildBVH();
+				createBVHBuffer();
+			}
+			
+		} catch (const std::exception& e) {
+			std::cout << "Warning: " << e.what() << " - Using default triangle" << std::endl;
+			Triangle defaultTriangle{};
+			defaultTriangle.v0 = glm::vec4(-1.0f, 0.0f, -1.0f, 1.0f);
+			defaultTriangle.v1 = glm::vec4(1.0f, 0.0f, -1.0f, 1.0f);
+			defaultTriangle.v2 = glm::vec4(0.0f, 2.0f, -1.0f, 1.0f);
+			defaultTriangle.normal = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f);
+			defaultTriangle.albedo = glm::vec4(0.2f, 0.4f, 0.8f, 0.0f);
+			defaultTriangle.specular = glm::vec4(0.1f, 0.1f, 0.1f, 0.0f);
+			_scene.triangles.push_back(defaultTriangle);
+			
+			VkDeviceSize triangleBufferSize = _scene.triangles.size() * sizeof(Triangle);
+			createStorageBuffer(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, triangleBufferSize, _scene.triangleBuffer, _scene.triangleBufferMemory, _scene.triangles.data());
+			std::cout << "Triangle buffer created: " << _scene.triangleBuffer << " size: " << triangleBufferSize << std::endl;
+			
+			buildBVH();
+			createBVHBuffer();
+		}
 	}
 
 	void RayTracer::createDescriptorSets() {
@@ -631,7 +838,7 @@ namespace vrt {
 			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 },
 			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 },
 			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
-			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 }
+			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4 }
 		};
 
 		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
@@ -688,7 +895,7 @@ namespace vrt {
 
 		{
 
-			std::vector<VkDescriptorSetLayoutBinding> computeDescriptorSetLayoutBindings{ 5 };
+			std::vector<VkDescriptorSetLayoutBinding> computeDescriptorSetLayoutBindings{ 7 };
 			VkDescriptorSetLayoutBinding computeSkyBoxDescriptorSetLayoutBinding{};
 			computeSkyBoxDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			computeSkyBoxDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -724,6 +931,20 @@ namespace vrt {
 			computePlanesDescriptorSetLayoutBinding.descriptorCount = 1;
 			computeDescriptorSetLayoutBindings[4] = computePlanesDescriptorSetLayoutBinding;
 
+			VkDescriptorSetLayoutBinding computeTrianglesDescriptorSetLayoutBinding{};
+			computeTrianglesDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			computeTrianglesDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+			computeTrianglesDescriptorSetLayoutBinding.binding = 5;
+			computeTrianglesDescriptorSetLayoutBinding.descriptorCount = 1;
+			computeDescriptorSetLayoutBindings[5] = computeTrianglesDescriptorSetLayoutBinding;
+
+			VkDescriptorSetLayoutBinding computeBVHDescriptorSetLayoutBinding{};
+			computeBVHDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			computeBVHDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+			computeBVHDescriptorSetLayoutBinding.binding = 6;
+			computeBVHDescriptorSetLayoutBinding.descriptorCount = 1;
+			computeDescriptorSetLayoutBindings[6] = computeBVHDescriptorSetLayoutBinding;
+
 			VkDescriptorSetLayoutCreateInfo computeDescriptorSetLayoutCreateInfo{};
 			computeDescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 			computeDescriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(computeDescriptorSetLayoutBindings.size());
@@ -748,7 +969,7 @@ namespace vrt {
 			skyBoxDescriptorImageInfo.imageView = _skyBox.imageView;
 			skyBoxDescriptorImageInfo.sampler = _sampler;
 
-			std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets{ 5 };
+			std::vector<VkWriteDescriptorSet> computeWriteDescriptorSets{ 6 };
 			VkWriteDescriptorSet computeSkyBoxWriteDescriptorSet{};
 			computeSkyBoxWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			computeSkyBoxWriteDescriptorSet.dstSet = _compute.descriptorSet;
@@ -808,6 +1029,41 @@ namespace vrt {
 			computePlanesWriteDescriptorSet.pBufferInfo = &planeDescriptorBufferInfo;
 			computePlanesWriteDescriptorSet.descriptorCount = 1;
 			computeWriteDescriptorSets[4] = computePlanesWriteDescriptorSet;
+
+
+			VkDescriptorBufferInfo triangleDescriptorBufferInfo{};
+			triangleDescriptorBufferInfo.buffer = _scene.triangleBuffer;
+			triangleDescriptorBufferInfo.range = VK_WHOLE_SIZE;
+			triangleDescriptorBufferInfo.offset = 0;
+
+			VkWriteDescriptorSet computeTrianglesWriteDescriptorSet{};
+			computeTrianglesWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			computeTrianglesWriteDescriptorSet.dstSet = _compute.descriptorSet;
+			computeTrianglesWriteDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			computeTrianglesWriteDescriptorSet.dstBinding = 5;
+			computeTrianglesWriteDescriptorSet.pBufferInfo = &triangleDescriptorBufferInfo;
+			computeTrianglesWriteDescriptorSet.descriptorCount = 1;
+			computeWriteDescriptorSets[5] = computeTrianglesWriteDescriptorSet;
+
+			VkDescriptorBufferInfo bvhDescriptorBufferInfo{};
+			bvhDescriptorBufferInfo.buffer = _scene.bvhBuffer;
+			bvhDescriptorBufferInfo.range = VK_WHOLE_SIZE;
+			bvhDescriptorBufferInfo.offset = 0;
+
+			VkWriteDescriptorSet computeBVHWriteDescriptorSet{};
+			computeBVHWriteDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			computeBVHWriteDescriptorSet.dstSet = _compute.descriptorSet;
+			computeBVHWriteDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			computeBVHWriteDescriptorSet.dstBinding = 6;
+			computeBVHWriteDescriptorSet.pBufferInfo = &bvhDescriptorBufferInfo;
+			computeBVHWriteDescriptorSet.descriptorCount = 1;
+			computeWriteDescriptorSets[6] = computeBVHWriteDescriptorSet;
+
+			std::cout << "Updating " << computeWriteDescriptorSets.size() << " descriptor sets" << std::endl;
+for (size_t i = 0; i < computeWriteDescriptorSets.size(); i++) {
+    std::cout << "DescriptorSet[" << i << "] binding=" << computeWriteDescriptorSets[i].dstBinding 
+              << " type=" << computeWriteDescriptorSets[i].descriptorType << std::endl;
+}
 
 			vkUpdateDescriptorSets(_logicalDevice, static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, nullptr);
 		}
@@ -1593,4 +1849,147 @@ namespace vrt {
 			throw std::runtime_error("Failed to create the shader module");
 		}
 	}
+void RayTracer::buildBVH() {
+    if (_scene.triangles.empty()) return;
+    
+    std::cout << "Building HIGH-PERFORMANCE BVH for " << _scene.triangles.size() << " triangles..." << std::endl;
+    
+    _scene.bvhNodes.clear();
+    
+    // Sauvegarder les triangles originaux
+    std::vector<Triangle> originalTriangles = _scene.triangles;
+    _scene.triangles.clear();  // On va les réorganiser
+    
+    // Créer liste d'indices
+    std::vector<int> triangleIndices;
+    for (int i = 0; i < originalTriangles.size(); i++) {
+        triangleIndices.push_back(i);
+    }
+    
+    // Construire le BVH en réorganisant les triangles
+    if (!triangleIndices.empty()) {
+        buildBVHWithReorganization(triangleIndices, originalTriangles, 0);
+    }
+    
+    std::cout << "HIGH-PERF BVH: " << _scene.bvhNodes.size() << " nodes, " 
+              << _scene.triangles.size() << " triangles reorganized" << std::endl;
+    
+    // CRUCIAL : Recréer le buffer GPU avec les triangles réorganisés 
+    updateTriangleBuffer();
+}
+
+int RayTracer::buildBVHWithReorganization(std::vector<int>& indices, 
+                                         const std::vector<Triangle>& original, 
+                                         int depth) {
+    if (indices.empty()) return -1;
+    
+    BVHNode node{};
+    int nodeIndex = _scene.bvhNodes.size();
+    _scene.bvhNodes.push_back(node);
+    
+    // Calculer bounding box
+    glm::vec3 boxMin(FLT_MAX), boxMax(-FLT_MAX);
+    for (int idx : indices) {
+        const Triangle& tri = original[idx];
+        glm::vec3 v0 = glm::vec3(tri.v0);
+        glm::vec3 v1 = glm::vec3(tri.v1);  
+        glm::vec3 v2 = glm::vec3(tri.v2);
+        
+        glm::vec3 triMin = glm::min(glm::min(v0, v1), v2);
+        glm::vec3 triMax = glm::max(glm::max(v0, v1), v2);
+        
+        boxMin = glm::min(boxMin, triMin);
+        boxMax = glm::max(boxMax, triMax);
+    }
+    
+    _scene.bvhNodes[nodeIndex].boxMin = glm::vec4(boxMin, 0.0f);
+    _scene.bvhNodes[nodeIndex].boxMax = glm::vec4(boxMax, 0.0f);
+    
+    // FEUILLE OPTIMISÉE : 8 triangles max, profondeur max 18
+    if (indices.size() <= 8 || depth > 18) {
+        int startIndex = _scene.triangles.size();
+        
+        // Copier tous les triangles de cette feuille de manière contiguë
+        for (int idx : indices) {
+            _scene.triangles.push_back(original[idx]);
+        }
+        
+        _scene.bvhNodes[nodeIndex].nodeData.x = -1;  // Feuille
+        _scene.bvhNodes[nodeIndex].nodeData.y = -1;  // Feuille
+        _scene.bvhNodes[nodeIndex].nodeData.z = startIndex;  // Offset contigu
+        _scene.bvhNodes[nodeIndex].nodeData.w = indices.size();  // Count
+        
+        return nodeIndex;
+    }
+    
+    // DIVISION OPTIMISÉE avec Surface Area Heuristic simplifié
+    glm::vec3 extent = boxMax - boxMin;
+    int bestAxis = (extent.x > extent.y) ? ((extent.x > extent.z) ? 0 : 2) : ((extent.y > extent.z) ? 1 : 2);
+    
+    // Trier par le centroïde des triangles
+    std::sort(indices.begin(), indices.end(), [&](int a, int b) {
+        const Triangle& triA = original[a];
+        const Triangle& triB = original[b];
+        
+        float centerA = (triA.v0[bestAxis] + triA.v1[bestAxis] + triA.v2[bestAxis]) / 3.0f;
+        float centerB = (triB.v0[bestAxis] + triB.v1[bestAxis] + triB.v2[bestAxis]) / 3.0f;
+        
+        return centerA < centerB;
+    });
+    
+    // Division équilibrée
+    int mid = indices.size() / 2;
+    std::vector<int> leftIndices(indices.begin(), indices.begin() + mid);
+    std::vector<int> rightIndices(indices.begin() + mid, indices.end());
+    
+    // Construire récursivement
+    int leftChild = buildBVHWithReorganization(leftIndices, original, depth + 1);
+    int rightChild = buildBVHWithReorganization(rightIndices, original, depth + 1);
+    
+    _scene.bvhNodes[nodeIndex].nodeData.x = leftChild;
+    _scene.bvhNodes[nodeIndex].nodeData.y = rightChild;
+    _scene.bvhNodes[nodeIndex].nodeData.z = -1;
+    _scene.bvhNodes[nodeIndex].nodeData.w = 0;
+    
+    return nodeIndex;
+}
+
+void RayTracer::updateTriangleBuffer() {
+    // Détruire l'ancien buffer
+    if (_scene.triangleBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(_logicalDevice, _scene.triangleBuffer, nullptr);
+        vkFreeMemory(_logicalDevice, _scene.triangleBufferMemory, nullptr);
+    }
+    
+    // Créer le nouveau buffer avec les triangles réorganisés
+    VkDeviceSize triangleBufferSize = _scene.triangles.size() * sizeof(Triangle);
+    
+    createStorageBuffer(
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        triangleBufferSize,
+        _scene.triangleBuffer,
+        _scene.triangleBufferMemory,
+        _scene.triangles.data()
+    );
+    
+    std::cout << "Triangle buffer recreated: " << triangleBufferSize << " bytes" << std::endl;
+}
+
+void RayTracer::createBVHBuffer() {
+    if (_scene.bvhNodes.empty()) return;
+    
+    VkDeviceSize bufferSize = sizeof(BVHNode) * _scene.bvhNodes.size();
+    
+    createStorageBuffer(
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        bufferSize,
+        _scene.bvhBuffer,
+        _scene.bvhBufferMemory,
+        _scene.bvhNodes.data()
+    );
+    
+    std::cout << "BVH buffer created: size=" << bufferSize << " bytes" << std::endl;
+}
 }
