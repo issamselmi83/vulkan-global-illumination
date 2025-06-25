@@ -744,7 +744,7 @@ namespace vrt {
 	
 		glm::vec3 x = { -1, 0, 0 };
 
-		auto mat = vrt::get(vrt::MaterialPreset::GlassBlue);
+		auto mat = vrt::get(vrt::MaterialPreset::Iron);
 
 		std::vector<Plane> planes = {
 			{ { 0.0f, -1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, mat.albedo, mat.specular },
@@ -759,7 +759,7 @@ namespace vrt {
         // === CONFIGURATION FLEXIBLE ===
         bool loadCube = true;      
         bool loadCone = true;
-        bool loadPyramid = false;
+        bool loadPyramid = true;
         bool loadTeapot = false;
         
         // CHARGEMENT CONDITIONNEL
@@ -772,21 +772,21 @@ namespace vrt {
 
 	if (loadCone) {
 		auto randomCol = vrt::get(randomPreset());
-		auto coneTriangles = mesh::loadOBJModel("../data/models/icosa.obj", glm::vec3(1.0f, 0.5f, 0.1f), glm::vec3(5.0f, 5.0f, 0.0f)); 
+		auto coneTriangles = mesh::loadOBJModel("../data/models/icosa.obj", randomCol.albedo, glm::vec3(5.0f, 5.0f, 0.0f)); 
 		_scene.triangles.insert(_scene.triangles.end(), coneTriangles.begin(), coneTriangles.end());
 		std::cout << "Loaded cone: " << coneTriangles.size() << " triangles" << std::endl;
 	}
 
 	if (loadPyramid) {
 		auto randomCol = vrt::get(randomPreset());
-		auto pyramidTriangles = mesh::loadOBJModel("../data/models/pyramid.obj", glm::vec3(1.0f, 0.2f, 0.2f), glm::vec3(0.0f, 0.0f, 5.0f)); 
+		auto pyramidTriangles = mesh::loadOBJModel("../data/models/pyramid.obj", randomCol.albedo, glm::vec3(0.0f, 0.0f, 5.0f)); 
 		_scene.triangles.insert(_scene.triangles.end(), pyramidTriangles.begin(), pyramidTriangles.end());
 		std::cout << "Loaded pyramid: " << pyramidTriangles.size() << " triangles" << std::endl;
 	}
 
 	if (loadTeapot) {
 		auto randomCol = vrt::get(randomPreset());
-		auto teapotTriangles = mesh::loadOBJModel("../data/models/epcot.obj", glm::vec3(0.2f, 1.0f, 0.3f), glm::vec3(0.0f, 0.0f, -5.0f));
+		auto teapotTriangles = mesh::loadOBJModel("../data/models/teapot.obj", randomCol.albedo, glm::vec3(0.0f, 0.0f, -5.0f));
 		_scene.triangles.insert(_scene.triangles.end(), teapotTriangles.begin(), teapotTriangles.end());
 		std::cout << "Loaded teapot: " << teapotTriangles.size() << " triangles" << std::endl;
 	}
@@ -1443,7 +1443,7 @@ for (size_t i = 0; i < computeWriteDescriptorSets.size(); i++) {
 		uint32_t transferQueueFamilyIndex;
 		if (!getTransferQueueFamilyIndex(queueFamilyProperties, &transferQueueFamilyIndex)) {
 			return UINT8_MAX;
-		}
+		}	
 
 		uint8_t quality{ 0 };
 

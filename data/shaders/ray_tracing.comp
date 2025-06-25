@@ -221,7 +221,7 @@ void main() {
 	for (int i = 0; i < ANTIALIASING_SAMPLES; i++) {
 		Ray ray = createCameraRay(i);
 		
-		for (int j = 0; j < 5; j++) {
+		for (int j = 0; j < 10; j++) {
 			RayHit hit = trace(ray);
 			result += ray.energy * shade(ray, hit);
 			
